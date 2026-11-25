@@ -54,13 +54,14 @@ namespace WifiHotspot
 
             Text = "代理功能开关";
             StartPosition = FormStartPosition.CenterParent;
-            FormBorderStyle = FormBorderStyle.FixedDialog;
-            MaximizeBox = false;
+            FormBorderStyle = FormBorderStyle.Sizable;
+            MaximizeBox = true;
             MinimizeBox = false;
             ShowInTaskbar = false;
-            ClientSize = new Size(680, 940);
+            ClientSize = new Size(680, 760);
             Font = new Font("Microsoft YaHei", 9F, FontStyle.Regular, GraphicsUnit.Point, 134);
 
+            var content = new Panel { Dock = DockStyle.Fill, AutoScroll = true, AutoScrollMinSize = new Size(0, 880) };
             var implemented = new GroupBox { Text = "已实现功能", Location = new Point(12, 12), Size = new Size(640, 455) };
             var missing = new GroupBox { Text = "未实现功能", Location = new Point(12, 475), Size = new Size(640, 100) };
             var note = new Label { Location = new Point(15, 405), Size = new Size(600, 42), ForeColor = Color.Gray };
@@ -171,9 +172,9 @@ namespace WifiHotspot
             var grpProbe = new GroupBox { Text = "探针日志 / 连通性测试", Location = new Point(12, 583), Size = new Size(640, 250) };
             txtProbeLog = new TextBox { Multiline = true, ReadOnly = true, Dock = DockStyle.Fill, ScrollBars = ScrollBars.Vertical, BackColor = Color.White, Font = new Font("Consolas", 9F) };
             var probePanel = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 44, FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(6, 6, 6, 6) };
-            var btnTest = NewButton("一键连通性测试");
+            var btnTest = NewButton("一键连通性测试", 150);
             btnTest.Click += RunConnectivityTest;
-            var btnClearLog = NewButton("清空日志");
+            var btnClearLog = NewButton("清空日志", 108);
             btnClearLog.Click += delegate { txtProbeLog.Clear(); _probeLogOffset = File.Exists(ProxyProcessManager.ProbeLogPath) ? new FileInfo(ProxyProcessManager.ProbeLogPath).Length : 0; };
             probePanel.Controls.Add(btnClearLog);
             probePanel.Controls.Add(btnTest);
@@ -185,7 +186,7 @@ namespace WifiHotspot
                              "；Wintun.dll " + (HotspotManager.WintunAvailable() ? "存在" : "缺失") +
                              "；网络层归一化 " + (NetworkNormalizer.Shared.IsRunning ? "运行" : "未运行");
 
-            var panel = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 70, FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(8, 8, 8, 8) };
+            var panel = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 48, FlowDirection = FlowDirection.RightToLeft, WrapContents = false, Padding = new Padding(8, 8, 8, 8) };
             var btnClose = NewButton("关闭");
             btnClose.Click += delegate { Close(); };
             var btnOpen = NewButton("打开配置文件");
@@ -205,10 +206,11 @@ namespace WifiHotspot
             panel.Controls.Add(btnSaveOnly);
             panel.Controls.Add(btnSaveRestart);
 
-            Controls.Add(implemented);
-            Controls.Add(missing);
-            Controls.Add(grpProbe);
-            Controls.Add(lblResult);
+            content.Controls.Add(implemented);
+            content.Controls.Add(missing);
+            content.Controls.Add(grpProbe);
+            content.Controls.Add(lblResult);
+            Controls.Add(content);
             Controls.Add(panel);
 
             probeTimer = new System.Windows.Forms.Timer { Interval = 800 };
@@ -493,9 +495,9 @@ namespace WifiHotspot
             return new TextBox { Text = value ?? string.Empty, Location = new Point(x, y), Size = new Size(width, 23) };
         }
 
-        private static Button NewButton(string caption)
+        private static Button NewButton(string caption, int width = 108)
         {
-            return new Button { Text = caption, AutoSize = true, MinimumSize = new Size(120, 30), UseVisualStyleBackColor = true };
+            return new Button { Text = caption, AutoSize = false, Size = new Size(width, 30), UseVisualStyleBackColor = true };
         }
 
         private ProxySettings Collect()
