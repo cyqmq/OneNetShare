@@ -570,10 +570,12 @@ namespace WifiHotspot
             var leaks = new List<string>();
             if (!string.IsNullOrEmpty(xff)) leaks.Add("X-Forwarded-For=" + xff);
             if (!string.IsNullOrEmpty(via)) leaks.Add("Via=" + via);
+            Dictionary<string, string> status = GetProxyStatus();
+            string diag = "UA预设=" + StatusValue(status, "ua_preset") + "，UA覆盖=" + Short(StatusValue(status, "user_agent_override"), 30) + "，规则数=" + StatusValue(status, "rules") + "，画像=" + StatusValue(status, "profile") + "，进程=" + StatusValue(status, "version") + " " + Short(StatusValue(status, "exe"), 40);
             if (unrewritten)
-                return "HTTP 改写失败（UA 仍是探针值；请从“UA 预设”选择内置画像，并点“保存并重启代理”。当前 UA=" + Short(ua, 60) + "）";
+                return "HTTP 改写失败（UA 仍是探针值；请从“UA 预设”选择内置画像，并点“保存并重启代理”。当前 UA=" + Short(ua, 60) + "；" + diag + "）";
             if (leaks.Count > 0)
-                return "HTTP 改写失败（泄露头未清除：" + string.Join("，", leaks.ToArray()) + "）";
+                return "HTTP 改写失败（泄露头未清除：" + string.Join("，", leaks.ToArray()) + "；" + diag + "）";
             return "HTTP 改写生效（UA=" + Short(ua, 60) + "，XFF/Via 已清除）";
         }
 
