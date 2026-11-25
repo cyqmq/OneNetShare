@@ -6,6 +6,7 @@ using System.Net.NetworkInformation;
 using System.Security.Principal;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
@@ -238,21 +239,79 @@ namespace WifiHotspot
             return r;
         }
 
+        private static bool IsWlanServiceRunning(string output)
+        {
+            return Regex.IsMatch(output, @"STATE\s*:\s*4\s+RUNNING", RegexOptions.IgnoreCase) ||
+                   Regex.IsMatch(output, @"状态\s*[:：]\s*4\s*正在运行") ||
+                   output.Contains("正在运行");
+        }
+
+        private static bool IsHostedNetworkStateError(string message)
+        {
+            return message.Contains("未能启动承载网络") ||
+                   message.Contains("无法启动承载网络") ||
+                   message.Contains("Hosted network couldn't be started") ||
+                   message.Contains("组或资源的状态不是执行请求操作的正确状态") ||
+                   message.Contains("The group or resource is not in the correct state");
+        }
+
+        private HotspotResult PrepareHostedNetwork()
+        {
+            var query = RunCommand("sc", "query WlanSvc");
+            if (!query.Success || !IsWlanServiceRunning(query.Message))
+            {
+                var startService = RunCommand("sc", "start WlanSvc");
+                if (!startService.Success &&
+                    !startService.Message.Contains("1056") &&
+                    !startService.Message.Contains("already running") &&
+                    !startService.Message.Contains("已经启动"))
+                {
+                    return new HotspotResult { Success = false, Message = "无法启动 WLAN AutoConfig 服务 (WlanSvc):\n" + startService.Message };
+                }
+            }
+
+            foreach (var nic in NetworkInterface.GetAllNetworkInterfaces())
+            {
+                if (nic.NetworkInterfaceType != NetworkInterfaceType.Wireless80211) continue;
+                if (nic.OperationalStatus != OperationalStatus.Down && nic.OperationalStatus != OperationalStatus.NotPresent) continue;
+                RunCommand("netsh", string.Format("interface set interface \"{0}\" admin=ENABLED", EscapeArgument(nic.Name)));
+            }
+
+            RunCommand("netsh", "wlan stop hostednetwork");
+            return new HotspotResult { Success = true, Message = "无线环境已准备" };
+        }
+
         public HotspotResult Start(IcsManager.NetworkAdapterInfo internetAdapter, string ssid, string password)
         {
+            var prepare = PrepareHostedNetwork();
+            if (!prepare.Success)
+                return prepare;
+
             var cfg = Configure(ssid, password);
             if (!cfg.Success)
                 return cfg;
 
             var startResult = RunCommand("netsh", "wlan start hostednetwork");
+            if (!startResult.Success && IsHostedNetworkStateError(startResult.Message))
+            {
+                RunCommand("netsh", "wlan stop hostednetwork");
+                Thread.Sleep(500);
+                cfg = Configure(ssid, password);
+                if (!cfg.Success)
+                    return cfg;
+                startResult = RunCommand("netsh", "wlan start hostednetwork");
+            }
+
             if (!startResult.Success)
             {
                 string m = startResult.Message;
-                if (m.Contains("Hosted network couldn't be started") || m.Contains("无法启动承载网络"))
-                    return new HotspotResult { Success = false, Message = "无法启动热点。可能原因:\n" +
-                        "1. 无线网卡被占用或已断开\n" +
-                        "2. 系统不支持承载网络\n" +
-                        "3. 需要以管理员身份运行\n\n原始信息:\n" + m };
+                if (IsHostedNetworkStateError(m))
+                    return new HotspotResult { Success = false, Message = "无法启动热点。已自动尝试启动 WLAN 服务、启用无线网卡并重置承载网络，但仍失败。请依次检查:\n" +
+                        "1. 飞行模式已关闭，无线射频开关已打开\n" +
+                        "2. Wi-Fi 适配器未被其他程序占用\n" +
+                        "3. netsh wlan show drivers 显示支持承载网络\n" +
+                        "4. Windows 设置中的移动热点未占用同一网卡\n" +
+                        "5. 更新无线网卡驱动；部分新版驱动已移除 Hosted Network\n\n原始信息:\n" + m };
                 return startResult;
             }
 
