@@ -14,12 +14,12 @@
 | HTTP Header 画像 | ✅（forward 代理） | ✅（透明代理） |
 | HTTPS CONNECT 盲隧道 | ✅ | ✅ |
 | Captive HTTP 代答/Drop | ✅ | ✅ |
-| REDIRECT / TPROXY / TUN 接管 | ❌ | ✅ |
-| TCP/IP 出口指纹统一 | ✅（WinDivert，需额外驱动） | ✅（网关重建连接） |
-| UDP 全量接管 | ❌ | ✅（TUN/TPROXY） |
-| DNS / NTP / mDNS / DHCP 归一化 | ❌ | ✅ |
-| Captive DNS 代答/Drop | ❌ | ✅ |
-| TTL / Hop Limit 归一化 | ❌ | ✅ |
+| REDIRECT / TPROXY / TUN 接管 | ✅（Wintun 全局 TUN） | ✅ |
+| TCP/IP 出口指纹统一 | ✅（Wintun TUN / WinDivert） | ✅（网关重建连接） |
+| UDP 全量接管 | ✅（Wintun TUN） | ✅（TUN/TPROXY） |
+| DNS / NTP / mDNS / DHCP 归一化 | ✅（Wintun TUN） | ✅ |
+| Captive DNS 代答/Drop | ✅（Wintun TUN） | ✅ |
+| TTL / Hop Limit 归一化 | ✅（Wintun IPv4 TUN / WinDivert） | ✅ |
 | TLS JA3/JA4 统一 | ❌ | ❌ |
 
 ## 功能
@@ -28,6 +28,7 @@
 - 自动诊断热点失败原因并给出可执行修改路径与设置入口
 - GUI 内置“代理功能”开关窗口，可编辑 HTTP Header/Captive/UDP/DNS/NTP/mDNS/DHCP 开关、设备指纹和随热点启停代理；未实现项在窗口内明确标注
 - 网络层指纹归一化：基于 WinDivert 在 Windows 网卡出口强制重写 TTL/IPID、IPv6 Flow Label 与 TCP SYN 选项；需要 WinDivert.dll/驱动和管理员权限
+- Wintun 全局 TUN 接管：创建 `OneNetShare Tunnel` 虚拟网卡，接管 IPv4 默认路由/DNS，在用户态重建 UDP/DNS/NTP 会话并统一出口包指纹；需要官方 x86 `wintun.dll` 和管理员权限
 - 自动配置 ICS（Internet Connection Sharing）网络共享
 - 可自定义 SSID、密码（8-63 位 WPA2）
 - 选择用于共享上网的物理网卡

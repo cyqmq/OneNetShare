@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Net;
 using System.Threading;
 
 namespace WifiHotspot
@@ -42,6 +43,16 @@ namespace WifiHotspot
 
         public static string Stop()
         {
+            bool graceful = false;
+            try
+            {
+                using (var client = new WebClient())
+                    client.DownloadString("http://127.0.0.1:18089/shutdown");
+                graceful = true;
+                Thread.Sleep(800);
+            }
+            catch { }
+
             int count = 0;
             foreach (Process process in Process.GetProcessesByName("hotspot-proxy"))
             {
@@ -54,7 +65,9 @@ namespace WifiHotspot
                 catch { }
                 finally { process.Dispose(); }
             }
-            return count == 0 ? "代理未运行" : "代理已停止 (" + count + ")";
+            if (count == 0)
+                return graceful ? "代理已停止，路由已恢复" : "代理未运行";
+            return graceful ? "代理已停止，已清理残留进程 (" + count + ")" : "代理已强制停止 (" + count + ")";
         }
     }
 }

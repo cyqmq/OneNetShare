@@ -13,6 +13,7 @@ import (
 
 	"hotspot-proxy/internal/config"
 	"hotspot-proxy/internal/headers"
+	"hotspot-proxy/internal/netutil"
 	"hotspot-proxy/internal/redirect"
 )
 
@@ -154,7 +155,7 @@ func (s *Server) handle(client *net.TCPConn, kind string) {
 }
 
 func (s *Server) dial(dst string) (net.Conn, error) {
-	conn, err := net.DialTimeout("tcp", dst, 15*time.Second)
+	conn, err := netutil.DialTimeout("tcp", dst, 15*time.Second)
 	if err != nil {
 		return nil, fmt.Errorf("连接目标 %s 失败: %w", dst, err)
 	}

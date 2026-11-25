@@ -23,6 +23,13 @@ namespace WifiHotspot
         public bool NetworkIPID { get; set; }
         public bool NetworkTCPOptions { get; set; }
         public bool NetworkForward { get; set; }
+        public bool TunEnabled { get; set; }
+        public string TunAdapter { get; set; }
+        public string TunIP { get; set; }
+        public string TunGatewayIP { get; set; }
+        public int TunPrefixLen { get; set; }
+        public bool TunRoute { get; set; }
+        public string TunUpstreamInterface { get; set; }
         public string Mode { get; set; }
         public string Profile { get; set; }
     }
@@ -50,6 +57,7 @@ namespace WifiHotspot
             IDictionary<string, object> dhcp = GetDict(deviceforge, "dhcp");
             IDictionary<string, object> captive = GetDict(deviceforge, "captive");
             IDictionary<string, object> network = GetDict(root, "network");
+            IDictionary<string, object> tun = GetDict(root, "tun");
 
             return new ProxySettings
             {
@@ -68,6 +76,13 @@ namespace WifiHotspot
                 NetworkIPID = GetBool(network, "ipid", true),
                 NetworkTCPOptions = GetBool(network, "tcp_options", true),
                 NetworkForward = GetBool(network, "forward", true),
+                TunEnabled = GetBool(tun, "enabled", false),
+                TunAdapter = GetString(tun, "name", "OneNetShare Tunnel"),
+                TunIP = GetString(tun, "ip", "10.66.0.1"),
+                TunGatewayIP = GetString(tun, "gateway_ip", "10.66.0.2"),
+                TunPrefixLen = GetInt(tun, "prefix_len", 24),
+                TunRoute = GetBool(tun, "route", true),
+                TunUpstreamInterface = GetString(tun, "upstream_interface", ""),
                 Mode = GetString(root, "mode", "forward"),
                 Profile = GetString(root, "default_profile", "chrome-win11")
             };
@@ -115,6 +130,15 @@ namespace WifiHotspot
             SetBool(network, "ipid", settings.NetworkIPID);
             SetBool(network, "tcp_options", settings.NetworkTCPOptions);
             SetBool(network, "forward", settings.NetworkForward);
+
+            IDictionary<string, object> tun = GetOrCreateDict(root, "tun");
+            SetBool(tun, "enabled", settings.TunEnabled);
+            SetString(tun, "name", string.IsNullOrEmpty(settings.TunAdapter) ? "OneNetShare Tunnel" : settings.TunAdapter);
+            SetString(tun, "ip", string.IsNullOrEmpty(settings.TunIP) ? "10.66.0.1" : settings.TunIP);
+            SetString(tun, "gateway_ip", string.IsNullOrEmpty(settings.TunGatewayIP) ? "10.66.0.2" : settings.TunGatewayIP);
+            SetInt(tun, "prefix_len", settings.TunPrefixLen <= 0 ? 24 : settings.TunPrefixLen);
+            SetBool(tun, "route", settings.TunRoute);
+            SetString(tun, "upstream_interface", settings.TunUpstreamInterface ?? string.Empty);
 
             SetBool(deviceforge, "enabled", settings.DeviceForgeEnabled);
             SetBool(deviceforge, "headers", settings.Headers);
@@ -194,6 +218,7 @@ namespace WifiHotspot
   ""auto_reload"": true,
   ""gui_auto_start_proxy"": true,
   ""network"": { ""enabled"": false, ""ttl"": 64, ""ipid"": true, ""tcp_options"": true, ""forward"": true },
+  ""tun"": { ""enabled"": false, ""name"": ""OneNetShare Tunnel"", ""ip"": ""10.66.0.1"", ""gateway_ip"": ""10.66.0.2"", ""prefix_len"": 24, ""route"": true, ""upstream_interface"": """" },
   ""log"": { ""level"": ""info"", ""file"": "" },
   ""deviceforge"": {
     ""enabled"": true,

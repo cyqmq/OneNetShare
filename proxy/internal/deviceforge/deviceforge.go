@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"hotspot-proxy/internal/config"
+	"hotspot-proxy/internal/netutil"
 )
 
 type Sender interface {
@@ -74,7 +75,7 @@ func (m *Manager) HandleUDP(srcIP net.IP, srcPort uint16, dstIP net.IP, dstPort 
 	}
 
 	if cfg.Captive.Enabled && dstPort == 53 {
-		resp, handled := CaptiveDNSReply(payload, cfg.Captive, sender.LocalIP())
+		resp, handled := CaptiveDNSReply(payload, cfg.Captive, dstIP)
 		if handled {
 			if len(resp) > 0 {
 				if err := sender.SendUDP(dstIP, dstPort, srcIP, srcPort, resp); err != nil {
@@ -159,12 +160,8 @@ func (m *Manager) getOrCreateSession(key string, srcIP net.IP, srcPort uint16, d
 		return s, nil
 	}
 
-	conn, err := net.DialUDP("udp4", nil, &net.UDPAddr{IP: targetIP.To4(), Port: int(targetPort)})
+	conn, err := netutil.DialUDP(&net.UDPAddr{IP: targetIP.To4(), Port: int(targetPort)}, nil)
 	if err != nil {
-		return nil, err
-	}
-	if err := markOutboundConn(conn); err != nil {
-		conn.Close()
 		return nil, err
 	}
 	s := &udpSession{

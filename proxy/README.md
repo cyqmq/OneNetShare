@@ -112,6 +112,15 @@ GOOS=windows GOARCH=386 CGO_ENABLED=0 go build -o build/hotspot-proxy-win-x86.ex
   "mode": "redirect",           // redirect (OpenWrt) / forward (Windows)
   "listen_http": "0.0.0.0:18080",
   "listen_https": "0.0.0.0:18443",
+  "tun": {
+    "enabled": true,
+    "name": "OneNetShare Tunnel",
+    "ip": "10.66.0.1",
+    "gateway_ip": "10.66.0.2",
+    "prefix_len": 24,
+    "route": true,
+    "upstream_interface": ""
+  },
    "default_profile": "chrome-win11",
    "deviceforge": {
      "enabled": true,
@@ -153,6 +162,8 @@ GOOS=windows GOARCH=386 CGO_ENABLED=0 go build -o build/hotspot-proxy-win-x86.ex
   ]
 }
 ```
+
+Windows 下 `tun.enabled=true` 使用 Wintun 全局接管：需把官方 x86 `wintun.dll` 放在 `hotspot-proxy.exe` 同目录并以管理员运行。`upstream_interface` 留空时自动读取 IPv4 默认路由对应的物理网卡；代理上游 TCP/UDP 会绑定到该网卡，避免流量重新进入 TUN。退出时通过 `GET /shutdown` 或直接信号恢复路由。
 
 内置画像名：`chrome-win11`, `chrome-win10`, `edge-win11`, `chrome-android`, `safari-ios`, `safari-macos`, `firefox-win11`, `curl-linux`。
 

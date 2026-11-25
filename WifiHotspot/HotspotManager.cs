@@ -41,6 +41,13 @@ namespace WifiHotspot
             }
         }
 
+        public static bool WintunAvailable()
+        {
+            string appDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "wintun.dll");
+            string systemDir = Path.Combine(Environment.SystemDirectory, "wintun.dll");
+            return File.Exists(appDir) || File.Exists(systemDir);
+        }
+
         public static string DecodeText(byte[] bytes)
         {
             if (bytes == null || bytes.Length == 0) return string.Empty;
@@ -213,6 +220,19 @@ namespace WifiHotspot
                 if (proxySettings.NetworkEnabled && !NetworkNormalizer.DriverAvailable())
                     AddIssue(diagnosis, "网络层归一化缺少 WinDivert", "已启用网络层指纹归一化，但程序目录和系统目录都没有 WinDivert.dll。",
                         "把 WinDivert 2.x 的 WinDivert.dll、WinDivert.sys 与对应架构驱动放到程序目录，并以管理员运行；或在“代理功能”窗口关闭网络层归一化。", string.Empty);
+
+                if (proxySettings.TunEnabled)
+                {
+                    if (!WintunAvailable())
+                        AddIssue(diagnosis, "全局 TUN 接管缺少 Wintun.dll", "已启用 Wintun 全局 TUN 接管，但程序目录和系统目录都没有 wintun.dll。",
+                            "把官方 Wintun 0.14.1 的 x86 wintun.dll 放到程序目录，并以管理员运行；或在“代理功能”窗口关闭全局 TUN 接管。", string.Empty);
+                    if (!IsAdministrator())
+                        AddIssue(diagnosis, "全局 TUN 接管需要管理员权限", "创建 Wintun 虚拟网卡、修改默认路由和 DNS 需要管理员权限。",
+                            "右键 WifiHotspot.exe → 以管理员身份运行。", string.Empty);
+                    if (!proxySettings.DeviceForgeEnabled || !proxySettings.Udp)
+                        AddIssue(diagnosis, "全局 TUN 接管未启用 UDP 伪装", "Wintun 已接管流量，但 DeviceForge 或 UDP 子开关关闭，DNS/NTP/mDNS 不会重建会话。",
+                            "打开“代理功能”→勾选“设备伪装模块总开关”和“UDP 会话重建”，保存并重启代理。", string.Empty);
+                }
             }
             catch { }
 

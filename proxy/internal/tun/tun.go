@@ -1,9 +1,3 @@
-//go:build linux
-
-// Package tun implements a userspace TUN-based transparent proxy.
-// It uses a simplified TCP state machine: outbound connections are
-// created by the gateway kernel via net.Dial, so all TCP/IP layer
-// parameters (IPID, ISN, window, MSS, timestamps) are gateway-native.
 package tun
 
 import (
@@ -12,26 +6,39 @@ import (
 	"hash/fnv"
 	"log"
 	"net"
-	"os/exec"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/songgao/water"
-	"golang.org/x/sys/unix"
+	"hotspot-proxy/internal/netutil"
 )
 
 const (
-	ipv4         = 0x45
-	tcpProtocol  = 6
-	udpProtocol  = 17
-	outboundMark = 2
-	finFlag      = 0x01
-	synFlag      = 0x02
-	rstFlag      = 0x04
-	ackFlag      = 0x10
-	pshFlag      = 0x08
+	ipv4        = 0x45
+	tcpProtocol = 6
+	udpProtocol = 17
+	finFlag     = 0x01
+	synFlag     = 0x02
+	rstFlag     = 0x04
+	ackFlag     = 0x10
+	pshFlag     = 0x08
 )
+
+type packetAdapter interface {
+	Read([]byte) (int, error)
+	Write([]byte) (int, error)
+	Close() error
+	Name() string
+}
+
+type Options struct {
+	Name              string
+	IP                string
+	GatewayIP         string
+	UpstreamInterface string
+	PrefixLen         int
+	Route             bool
+}
 
 type connection struct {
 	key        string
@@ -41,6 +48,7 @@ type connection struct {
 	dstPort    uint16
 	seq        uint32
 	ack        uint32
+	stateMu    sync.Mutex
 	upstream   net.Conn
 	lastSeen   time.Time
 	closed     bool
@@ -49,7 +57,7 @@ type connection struct {
 type UDPHandler func(srcIP net.IP, srcPort uint16, dstIP net.IP, dstPort uint16, payload []byte)
 
 type Device struct {
-	iface          *water.Interface
+	iface          packetAdapter
 	tunIP          net.IP
 	logger         *log.Logger
 	conns          sync.Map
@@ -57,30 +65,26 @@ type Device struct {
 	udpHandler     UDPHandler
 	ipid           uint16
 	mu             sync.Mutex
+	closeOnce      sync.Once
 	wg             sync.WaitGroup
 	quit           chan struct{}
 }
 
 func New(tunName string, tunIP string, logger *log.Logger) (*Device, error) {
-	cfg := water.Config{DeviceType: water.TUN}
-	cfg.Name = tunName
-	iface, err := water.New(cfg)
-	if err != nil {
-		return nil, fmt.Errorf("创建 TUN 设备失败: %w", err)
-	}
-
 	ip := net.ParseIP(tunIP)
-	if ip == nil {
+	if ip == nil || ip.To4() == nil {
 		return nil, fmt.Errorf("无效 TUN IP: %s", tunIP)
 	}
-
-	d := &Device{
+	iface, err := newAdapter(tunName, ip.To4().String(), logger)
+	if err != nil {
+		return nil, err
+	}
+	return &Device{
 		iface:  iface,
 		tunIP:  ip.To4(),
 		logger: logger,
 		quit:   make(chan struct{}),
-	}
-	return d, nil
+	}, nil
 }
 
 func (d *Device) Name() string { return d.iface.Name() }
@@ -90,9 +94,13 @@ func (d *Device) LocalIP() net.IP { return d.tunIP }
 func (d *Device) SetUDPHandler(h UDPHandler) { d.udpHandler = h }
 
 func (d *Device) Close() {
-	close(d.quit)
-	d.iface.Close()
-	d.wg.Wait()
+	d.closeOnce.Do(func() {
+		close(d.quit)
+		if err := d.iface.Close(); err != nil {
+			d.logger.Printf("关闭 TUN 设备: %v", err)
+		}
+		d.wg.Wait()
+	})
 }
 
 func connKey(srcIP net.IP, srcPort, dstPort uint16, dstIP net.IP) string {
@@ -104,25 +112,6 @@ func (d *Device) nextIPID() uint16 {
 	defer d.mu.Unlock()
 	d.ipid++
 	return d.ipid
-}
-
-func markTCPConn(conn net.Conn) error {
-	tc, ok := conn.(*net.TCPConn)
-	if !ok {
-		return nil
-	}
-	rc, err := tc.SyscallConn()
-	if err != nil {
-		return err
-	}
-	var opErr error
-	err = rc.Control(func(fd uintptr) {
-		opErr = unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_MARK, outboundMark)
-	})
-	if err != nil {
-		return err
-	}
-	return opErr
 }
 
 func checksum(data []byte) uint16 {
@@ -139,6 +128,11 @@ func checksum(data []byte) uint16 {
 	return ^uint16(sum)
 }
 
+func (d *Device) writePacket(pkt []byte) error {
+	_, err := d.iface.Write(pkt)
+	return err
+}
+
 func (d *Device) sendPacket(dstIP net.IP, dstPort uint16, srcIP net.IP, srcPort uint16,
 	seq, ack uint32, flags byte, payload []byte) error {
 
@@ -146,19 +140,17 @@ func (d *Device) sendPacket(dstIP net.IP, dstPort uint16, srcIP net.IP, srcPort 
 	totalLen := 20 + tcpLen
 
 	pkt := make([]byte, totalLen)
-	// IPv4 header
 	pkt[0] = ipv4
 	pkt[1] = 0
 	binary.BigEndian.PutUint16(pkt[2:4], uint16(totalLen))
 	binary.BigEndian.PutUint16(pkt[4:6], d.nextIPID())
-	binary.BigEndian.PutUint16(pkt[6:8], 0x4000) // Don't Fragment
-	pkt[8] = 64                                  // TTL
+	binary.BigEndian.PutUint16(pkt[6:8], 0x4000)
+	pkt[8] = 64
 	pkt[9] = tcpProtocol
 	copy(pkt[12:16], srcIP.To4())
 	copy(pkt[16:20], dstIP.To4())
 	binary.BigEndian.PutUint16(pkt[10:12], checksum(pkt[:20]))
 
-	// TCP header
 	t := pkt[20:]
 	binary.BigEndian.PutUint16(t[0:2], srcPort)
 	binary.BigEndian.PutUint16(t[2:4], dstPort)
@@ -166,12 +158,11 @@ func (d *Device) sendPacket(dstIP net.IP, dstPort uint16, srcIP net.IP, srcPort 
 	binary.BigEndian.PutUint32(t[8:12], ack)
 	t[12] = 5 << 4
 	t[13] = flags
-	binary.BigEndian.PutUint16(t[14:16], 8192) // window
-	binary.BigEndian.PutUint16(t[16:18], 0)    // checksum (computed below)
-	binary.BigEndian.PutUint16(t[18:20], 0)    // urgent
+	binary.BigEndian.PutUint16(t[14:16], 8192)
+	binary.BigEndian.PutUint16(t[16:18], 0)
+	binary.BigEndian.PutUint16(t[18:20], 0)
 	copy(t[20:], payload)
 
-	// TCP checksum with pseudo-header
 	ph := make([]byte, 12+tcpLen)
 	copy(ph[0:4], srcIP.To4())
 	copy(ph[4:8], dstIP.To4())
@@ -181,8 +172,7 @@ func (d *Device) sendPacket(dstIP net.IP, dstPort uint16, srcIP net.IP, srcPort 
 	copy(ph[12:], t)
 	binary.BigEndian.PutUint16(t[16:18], checksum(ph))
 
-	_, err := d.iface.Write(pkt)
-	return err
+	return d.writePacket(pkt)
 }
 
 func (d *Device) SendUDP(srcIP net.IP, srcPort uint16, dstIP net.IP, dstPort uint16, payload []byte) error {
@@ -216,8 +206,7 @@ func (d *Device) SendUDP(srcIP net.IP, srcPort uint16, dstIP net.IP, dstPort uin
 	binary.BigEndian.PutUint16(u[6:8], checksum(ph))
 
 	d.recentOutbound.Store(hashPacket(pkt), time.Now().UnixNano())
-	_, err := d.iface.Write(pkt)
-	return err
+	return d.writePacket(pkt)
 }
 
 func hashPacket(pkt []byte) uint64 {
@@ -260,7 +249,8 @@ func (d *Device) Run() error {
 			d.logger.Printf("TUN 读取错误: %v", err)
 			continue
 		}
-		go d.handlePacket(buf[:n])
+		pkt := append([]byte(nil), buf[:n]...)
+		go d.handlePacket(pkt)
 	}
 }
 
@@ -297,7 +287,6 @@ func (d *Device) handlePacket(pkt []byte) {
 	srcPort := binary.BigEndian.Uint16(t[0:2])
 	dstPort := binary.BigEndian.Uint16(t[2:4])
 	seq := binary.BigEndian.Uint32(t[4:8])
-	ack := binary.BigEndian.Uint32(t[8:12])
 	dataOff := int((t[12]>>4)&0x0f) * 4
 	if dataOff < 20 || dataOff > len(t) {
 		return
@@ -308,15 +297,14 @@ func (d *Device) handlePacket(pkt []byte) {
 	key := connKey(srcIP, srcPort, dstPort, dstIP)
 
 	if flags&synFlag != 0 && flags&ackFlag == 0 {
-		d.handleSYN(key, srcIP, srcPort, dstIP, dstPort, seq, ack)
+		d.handleSYN(key, srcIP, srcPort, dstIP, dstPort, seq)
 		return
 	}
 
 	val, ok := d.conns.Load(key)
 	if !ok {
-		// RST for unknown connection
 		if flags&rstFlag == 0 {
-			d.sendPacket(srcIP, srcPort, dstIP, dstPort, ack, seq+uint32(len(payload)), rstFlag|ackFlag, nil)
+			d.sendPacket(srcIP, srcPort, dstIP, dstPort, 0, seq+uint32(len(payload)), rstFlag|ackFlag, nil)
 		}
 		return
 	}
@@ -337,12 +325,16 @@ func (d *Device) handlePacket(pkt []byte) {
 			d.closeConnection(c, key)
 			return
 		}
+		c.stateMu.Lock()
 		c.ack = seq + uint32(len(payload))
-		d.sendPacket(srcIP, srcPort, dstIP, dstPort, c.seq, c.ack, ackFlag, nil)
+		ack := c.ack
+		nextSeq := c.seq
+		c.stateMu.Unlock()
+		d.sendPacket(srcIP, srcPort, dstIP, dstPort, nextSeq, ack, ackFlag, nil)
 	}
 }
 
-func (d *Device) handleSYN(key string, srcIP net.IP, srcPort uint16, dstIP net.IP, dstPort uint16, seq, ack uint32) {
+func (d *Device) handleSYN(key string, srcIP net.IP, srcPort uint16, dstIP net.IP, dstPort uint16, seq uint32) {
 	if _, exists := d.conns.Load(key); exists {
 		return
 	}
@@ -355,19 +347,14 @@ func (d *Device) handleSYN(key string, srcIP net.IP, srcPort uint16, dstIP net.I
 	}
 	d.conns.Store(key, c)
 
-	// SYNC-ACK back to client (generated by our userspace stack)
 	d.sendPacket(dstIP, dstPort, srcIP, srcPort, c.seq, c.ack, synFlag|ackFlag, nil)
 
-	// Establish real outbound connection from gateway kernel
 	dst := net.JoinHostPort(dstIP.String(), fmt.Sprintf("%d", dstPort))
-	upstream, err := net.DialTimeout("tcp", dst, 10*time.Second)
+	upstream, err := netutil.DialTimeout("tcp", dst, 10*time.Second)
 	if err != nil {
 		d.logger.Printf("[tun] dial %s: %v", dst, err)
 		d.conns.Delete(key)
 		return
-	}
-	if err := markTCPConn(upstream); err != nil {
-		d.logger.Printf("[tun] mark upstream: %v", err)
 	}
 	c.upstream = upstream
 	d.wg.Add(1)
@@ -383,9 +370,12 @@ func (d *Device) pumpUpstream(c *connection) {
 		n, err := c.upstream.Read(buf)
 		if n > 0 {
 			payload := append([]byte(nil), buf[:n]...)
-			d.sendPacket(c.dstIP, c.dstPort, c.clientIP, c.clientPort,
-				c.seq, c.ack, pshFlag|ackFlag, payload)
+			c.stateMu.Lock()
+			seq, ack := c.seq, c.ack
 			c.seq += uint32(n)
+			c.stateMu.Unlock()
+			d.sendPacket(c.dstIP, c.dstPort, c.clientIP, c.clientPort,
+				seq, ack, pshFlag|ackFlag, payload)
 		}
 		if err != nil {
 			break
@@ -395,16 +385,20 @@ func (d *Device) pumpUpstream(c *connection) {
 }
 
 func (d *Device) closeConnection(c *connection, key string) {
+	c.stateMu.Lock()
 	if c.closed {
+		c.stateMu.Unlock()
 		return
 	}
 	c.closed = true
+	seq, ack := c.seq, c.ack
+	c.stateMu.Unlock()
 	d.conns.Delete(key)
 	if c.upstream != nil {
 		c.upstream.Close()
 	}
 	d.sendPacket(c.dstIP, c.dstPort, c.clientIP, c.clientPort,
-		c.seq, c.ack+1, finFlag|ackFlag, nil)
+		seq, ack+1, finFlag|ackFlag, nil)
 }
 
 func (d *Device) StartCleanup() {
@@ -434,25 +428,4 @@ func (d *Device) StartCleanup() {
 			}
 		}
 	}()
-}
-
-func SetupTUN(name, ip, cidr string) error {
-	// ip link set <name> up
-	if err := runCommand("ip", "link", "set", name, "up"); err != nil {
-		return err
-	}
-	// ip addr add <ip>/24 dev <name>
-	if err := runCommand("ip", "addr", "add", ip+"/24", "dev", name); err != nil {
-		return err
-	}
-	return nil
-}
-
-func runCommand(name string, args ...string) error {
-	cmd := exec.Command(name, args...)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("%s %v: %w: %s", name, args, err, string(out))
-	}
-	return nil
 }

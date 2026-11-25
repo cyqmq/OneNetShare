@@ -12,6 +12,15 @@
     "tcp_options": true,
     "forward": true
   },
+  "tun": {
+    "enabled": false,
+    "name": "OneNetShare Tunnel",
+    "ip": "10.66.0.1",
+    "gateway_ip": "10.66.0.2",
+    "prefix_len": 24,
+    "route": true,
+    "upstream_interface": ""
+  },
   "log": {
     "level": "info",
     "file": ""

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 )
@@ -24,11 +25,13 @@ type Config struct {
 }
 
 type TUNConfig struct {
-	Enabled   bool   `json:"enabled"`
-	Name      string `json:"name"`
-	IP        string `json:"ip"`
-	GatewayIP string `json:"gateway_ip"`
-	Route     bool   `json:"route"`
+	Enabled           bool   `json:"enabled"`
+	Name              string `json:"name"`
+	IP                string `json:"ip"`
+	GatewayIP         string `json:"gateway_ip"`
+	UpstreamInterface string `json:"upstream_interface"`
+	PrefixLen         int    `json:"prefix_len"`
+	Route             *bool  `json:"route"`
 }
 
 type DeviceForgeConfig struct {
@@ -198,6 +201,22 @@ func (l *Loader) applyDefaults(cfg *Config) {
 	if cfg.Log.Level == "" {
 		cfg.Log.Level = "info"
 	}
+	if cfg.TUN.Name == "" {
+		if runtime.GOOS == "windows" {
+			cfg.TUN.Name = "OneNetShare Tunnel"
+		} else {
+			cfg.TUN.Name = "tun0"
+		}
+	}
+	if cfg.TUN.IP == "" {
+		cfg.TUN.IP = "10.66.0.1"
+	}
+	if cfg.TUN.GatewayIP == "" {
+		cfg.TUN.GatewayIP = "10.66.0.2"
+	}
+	if cfg.TUN.PrefixLen <= 0 || cfg.TUN.PrefixLen > 32 {
+		cfg.TUN.PrefixLen = 24
+	}
 	if cfg.DeviceForge.TargetOS == "" {
 		cfg.DeviceForge.TargetOS = "windows-11"
 	}
@@ -278,6 +297,15 @@ func DefaultJSON() string {
   "default_profile": "chrome-win11",
   "auto_reload": true,
   "log": {"level": "info", "file": ""},
+  "tun": {
+    "enabled": false,
+    "name": "OneNetShare Tunnel",
+    "ip": "10.66.0.1",
+    "gateway_ip": "10.66.0.2",
+    "prefix_len": 24,
+    "route": true,
+    "upstream_interface": ""
+  },
   "deviceforge": {
     "enabled": true,
     "target_os": "windows-11",

@@ -205,8 +205,13 @@ namespace WifiHotspot
                 string proxyMessage = string.Empty;
                 try
                 {
-                    if (ProxyConfigManager.Load().AutoStartProxy)
+                    ProxySettings settings = ProxyConfigManager.Load();
+                    if (settings.AutoStartProxy)
+                    {
                         proxyMessage = "\n" + ProxyProcessManager.Start(ProxyConfigManager.DefaultConfigPath);
+                        if (settings.TunEnabled && !ProxyProcessManager.IsRunning())
+                            ShowHotspotDiagnosis("全局 TUN 代理启动失败：\n" + proxyMessage, selected);
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -264,7 +269,7 @@ namespace WifiHotspot
             try
             {
                 ProxySettings settings = ProxyConfigManager.Load();
-                if (!settings.NetworkEnabled) return;
+                if (settings.TunEnabled || !settings.NetworkEnabled) return;
                 var result = NetworkNormalizer.Shared.Start(settings);
                 if (!result.Success) ShowHotspotDiagnosis("网络层归一化启动失败:\n" + result.Message, null);
             }

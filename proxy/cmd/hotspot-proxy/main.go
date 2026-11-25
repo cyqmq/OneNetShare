@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -63,18 +64,21 @@ func main() {
 	cfg := loader.Get()
 
 	if cfg.TUN.Enabled {
-		if cfg.TUN.Name == "" {
-			cfg.TUN.Name = "tun0"
-		}
-		if cfg.TUN.IP == "" {
-			cfg.TUN.IP = "10.66.0.1"
-		}
 		tunDev, err := tun.New(cfg.TUN.Name, cfg.TUN.IP, logger)
 		if err != nil {
 			logger.Fatalf("TUN 初始化失败: %v", err)
 		}
-		if err := tun.SetupTUN(cfg.TUN.Name, cfg.TUN.IP, "24"); err != nil {
-			logger.Printf("TUN 接口配置: %v", err)
+		route := true
+		if cfg.TUN.Route != nil {
+			route = *cfg.TUN.Route
+		}
+		cleanup, err := tun.SetupTUN(tun.Options{
+			Name: cfg.TUN.Name, IP: cfg.TUN.IP, GatewayIP: cfg.TUN.GatewayIP,
+			UpstreamInterface: cfg.TUN.UpstreamInterface, PrefixLen: cfg.TUN.PrefixLen, Route: route,
+		}, logger)
+		if err != nil {
+			tunDev.Close()
+			logger.Fatalf("TUN 路由配置失败: %v", err)
 		}
 		tunDev.StartCleanup()
 		if cfg.DeviceForge.Enabled {
@@ -83,13 +87,39 @@ func main() {
 			})
 			forge.Reload(cfg)
 		}
+
+		stopCh := make(chan struct{})
+		var stopOnce sync.Once
+		stop := func() { stopOnce.Do(func() { close(stopCh) }) }
+		go startStatusServer(loader, logger, stop)
 		go func() {
 			if err := tunDev.Run(); err != nil {
 				logger.Printf("TUN 运行错误: %v", err)
+				stop()
 			}
 		}()
-		logger.Printf("TUN 模式运行: %s (%s)", tunDev.Name(), cfg.TUN.IP)
-		select {}
+		logger.Printf("全局 TUN 模式运行: %s (%s)", tunDev.Name(), cfg.TUN.IP)
+
+		sigCh := make(chan os.Signal, 1)
+		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+		for {
+			select {
+			case <-stopCh:
+				cleanup()
+				tunDev.Close()
+				logger.Printf("全局 TUN 模式已退出，路由已恢复")
+				return
+			case sig := <-sigCh:
+				if sig == syscall.SIGHUP {
+					if err := loader.Reload(); err != nil {
+						logger.Printf("reload 失败: %v", err)
+					}
+					continue
+				}
+				logger.Printf("收到 %v，退出", sig)
+				stop()
+			}
+		}
 	}
 
 	if cfg.DeviceForge.Enabled && cfg.DeviceForge.UDP.Enabled {
@@ -116,7 +146,11 @@ func main() {
 	}()
 
 	go startReloadWatcher(loader, logger)
-	go startStatusServer(loader, logger)
+
+	stopCh := make(chan struct{})
+	var stopOnce sync.Once
+	stop := func() { stopOnce.Do(func() { close(stopCh) }) }
+	go startStatusServer(loader, logger, stop)
 
 	logger.Printf("%s 启动完成 (http=%s https=%s mode=%s)",
 		version.String(), cfg.ListenHTTP, cfg.ListenHTTPS, cfg.Mode)
@@ -124,16 +158,20 @@ func main() {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 	for {
-		sig := <-sigCh
-		if sig == syscall.SIGHUP {
-			if err := loader.Reload(); err != nil {
-				logger.Printf("reload 失败: %v", err)
+		select {
+		case <-stopCh:
+			srv.Close()
+			return
+		case sig := <-sigCh:
+			if sig == syscall.SIGHUP {
+				if err := loader.Reload(); err != nil {
+					logger.Printf("reload 失败: %v", err)
+				}
+				continue
 			}
-			continue
+			logger.Printf("收到 %v，退出", sig)
+			stop()
 		}
-		logger.Printf("收到 %v，退出", sig)
-		srv.Close()
-		return
 	}
 }
 
@@ -151,12 +189,12 @@ func startReloadWatcher(loader *config.Loader, logger *log.Logger) {
 	}
 }
 
-func startStatusServer(loader *config.Loader, logger *log.Logger) {
+func startStatusServer(loader *config.Loader, logger *log.Logger, stop func()) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/status", func(w http.ResponseWriter, r *http.Request) {
 		cfg := loader.Get()
-		fmt.Fprintf(w, "mode=%s enabled=%v profile=%s rules=%d\n",
-			cfg.Mode, cfg.Enabled, cfg.DefaultProfile, len(cfg.Rules))
+		fmt.Fprintf(w, "mode=%s enabled=%v profile=%s rules=%d tun=%v\n",
+			cfg.Mode, cfg.Enabled, cfg.DefaultProfile, len(cfg.Rules), cfg.TUN.Enabled)
 		fmt.Fprintf(w, "deviceforge=%v target=%s udp=%v dns=%v ntp=%v mdns=%v dhcp=%v captive=%v/%s headers=%v\n",
 			cfg.DeviceForge.Enabled, cfg.DeviceForge.TargetOS, cfg.DeviceForge.UDP.Enabled,
 			cfg.DeviceForge.DNS.Enabled, cfg.DeviceForge.NTP.Enabled,
@@ -168,6 +206,10 @@ func startStatusServer(loader *config.Loader, logger *log.Logger) {
 			http.Error(w, err.Error(), 500)
 			return
 		}
+		io.WriteString(w, "ok\n")
+	})
+	mux.HandleFunc("/shutdown", func(w http.ResponseWriter, r *http.Request) {
+		stop()
 		io.WriteString(w, "ok\n")
 	})
 	srv := &http.Server{Addr: "127.0.0.1:18089", Handler: mux, ReadHeaderTimeout: 5 * time.Second}
