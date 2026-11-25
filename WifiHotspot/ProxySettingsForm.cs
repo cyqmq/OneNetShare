@@ -377,9 +377,12 @@ namespace WifiHotspot
                 : "仍需检查；" + http + "；" + tun;
         }
 
-        private static string TestHttpRewrite()
+        private string TestHttpRewrite()
         {
             if (!ProxyProcessManager.IsRunning()) return "HTTP 改写失败（代理未运行）";
+            ProxySettings settings = ProxyConfigManager.Load(_configPath);
+            if (!settings.Enabled || !settings.DeviceForgeEnabled || !settings.Headers)
+                return "HTTP 改写失败（总开关/设备伪装/Header 有未勾选项，请保存并重启代理）";
             string observed = null;
             Exception failure = null;
             HttpListener listener = null;
@@ -428,10 +431,36 @@ namespace WifiHotspot
             }
             if (failure != null) return "HTTP 改写失败（" + failure.Message + "）";
             if (string.IsNullOrEmpty(observed)) return "HTTP 改写失败（本地探针未收到请求）";
-            bool unrewritten = observed.IndexOf("OneNetShare-Unprobed", StringComparison.OrdinalIgnoreCase) >= 0;
-            bool leaked = observed.Contains("203.0.113.9") || observed.IndexOf("unprobed", StringComparison.OrdinalIgnoreCase) >= 0;
-            if (unrewritten || leaked) return "HTTP 改写失败（UA 未改写或泄露头未清除）";
-            return "HTTP 改写生效（UA 已替换，XFF/Via 已清除）";
+            string ua = GetHeaderValue(observed, "User-Agent");
+            string xff = GetHeaderValue(observed, "X-Forwarded-For");
+            string via = GetHeaderValue(observed, "Via");
+            bool unrewritten = ua.IndexOf("OneNetShare-Unprobed", StringComparison.OrdinalIgnoreCase) >= 0;
+            var leaks = new List<string>();
+            if (!string.IsNullOrEmpty(xff)) leaks.Add("X-Forwarded-For=" + xff);
+            if (!string.IsNullOrEmpty(via)) leaks.Add("Via=" + via);
+            if (unrewritten)
+                return "HTTP 改写失败（UA 仍是探针值；请确认当前画像含 User-Agent，并点“保存并重启代理”。当前 UA=" + Short(ua, 60) + "）";
+            if (leaks.Count > 0)
+                return "HTTP 改写失败（泄露头未清除：" + string.Join("，", leaks.ToArray()) + "）";
+            return "HTTP 改写生效（UA=" + Short(ua, 60) + "，XFF/Via 已清除）";
+        }
+
+        private static string GetHeaderValue(string headers, string name)
+        {
+            foreach (string line in headers.Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                int colon = line.IndexOf(':');
+                if (colon <= 0) continue;
+                if (line.Substring(0, colon).Trim().Equals(name, StringComparison.OrdinalIgnoreCase))
+                    return line.Substring(colon + 1).Trim();
+            }
+            return string.Empty;
+        }
+
+        private static string Short(string value, int max)
+        {
+            if (string.IsNullOrEmpty(value)) return "(空)";
+            return value.Length <= max ? value : value.Substring(0, max) + "...";
         }
 
         private static string TestTunRoute()
