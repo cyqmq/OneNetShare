@@ -218,12 +218,11 @@ namespace WifiHotspot
                             ShowHotspotDiagnosis("全局 TUN 代理启动失败：\n" + proxyMessage, selected);
                     }
                     List<string> globalIPv6 = ProxyDiagnostics.FindHotspotGlobalIPv6();
-                    bool needIPv6Guard = IPv6Guard.IsEnabled(settings.IPv6Policy) || globalIPv6.Count > 0;
+                    bool needIPv6Guard = globalIPv6.Count > 0;
                     if (needIPv6Guard)
                     {
-                        string policy = IPv6Guard.IsEnabled(settings.IPv6Policy) ? settings.IPv6Policy : "block";
-                        if (globalIPv6.Count > 0 && !IPv6Guard.IsEnabled(settings.IPv6Policy))
-                            proxyMessage += "\n检测到热点网卡公网 IPv6 " + string.Join(", ", globalIPv6.ToArray()) + "，自动启用封禁。";
+                        string policy = "block";
+                        proxyMessage += "\n检测到热点网卡公网 IPv6 " + string.Join(", ", globalIPv6.ToArray()) + "，自动启用全局转发封禁。";
                         var ipv6Result = IPv6Guard.Start(policy);
                         proxyMessage += "\n" + ipv6Result.Message;
                         if (!ipv6Result.Success)
