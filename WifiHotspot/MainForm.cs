@@ -247,19 +247,12 @@ namespace WifiHotspot
                         if (!portalResult.Success)
                             ShowHotspotDiagnosis("Portal 封堵启动失败：\n" + portalResult.Message, selected);
                     }
-                    if (settings.MonitorEnabled && settings.MonitorTtl)
+                    if (settings.MonitorEnabled && (settings.MonitorTtl || settings.MonitorDns))
                     {
                         var monitorResult = TrafficMonitor.Shared.Start(settings);
                         proxyMessage += "\n" + monitorResult.Message;
                         if (!monitorResult.Success)
-                            ShowHotspotDiagnosis("TTL 跳数监控启动失败：\n" + monitorResult.Message, selected);
-                    }
-                    if (settings.MonitorEnabled && settings.MonitorDns)
-                    {
-                        var dnsResult = DnsMonitor.Shared.Start(settings);
-                        proxyMessage += "\n" + dnsResult.Message;
-                        if (!dnsResult.Success)
-                            ShowHotspotDiagnosis("DNS 端口监控启动失败：\n" + dnsResult.Message, selected);
+                            ShowHotspotDiagnosis("核心监控启动失败：\n" + monitorResult.Message, selected);
                     }
                 }
                 catch (Exception ex)
@@ -293,10 +286,8 @@ namespace WifiHotspot
                     if (settings.IPv6GuardEnabled || IPv6Guard.IsRunning)
                         proxyMessage += "\n" + IPv6Guard.Stop().Message;
                     proxyMessage += "\n" + PortalGuard.Stop().Message;
-                    if (settings.MonitorEnabled || TrafficMonitor.Shared.IsRunning)
+                    if (settings.MonitorEnabled || TrafficMonitor.Shared.IsRunning || DnsMonitor.Shared.IsRunning)
                         proxyMessage += "\n" + TrafficMonitor.Shared.Stop().Message;
-                    if (settings.MonitorEnabled || DnsMonitor.Shared.IsRunning)
-                        proxyMessage += "\n" + DnsMonitor.Shared.Stop().Message;
                 }
                 catch { }
                 MessageBox.Show(result.Message + proxyMessage, "停止结果", MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -343,20 +334,15 @@ namespace WifiHotspot
                 string detail;
                 if (_manager.GetStatus(out detail) != HotspotStatus.Running) return;
                 ProxySettings settings = ProxyConfigManager.Load();
-                if (settings.MonitorEnabled && settings.MonitorTtl)
+                if (settings.MonitorEnabled && (settings.MonitorTtl || settings.MonitorDns))
                 {
                     var result = TrafficMonitor.Shared.Start(settings);
-                    if (!result.Success) ShowHotspotDiagnosis("TTL 跳数监控启动失败:\n" + result.Message, null);
-                }
-                if (settings.MonitorEnabled && settings.MonitorDns)
-                {
-                    var dnsResult = DnsMonitor.Shared.Start(settings);
-                    if (!dnsResult.Success) ShowHotspotDiagnosis("DNS 端口监控启动失败:\n" + dnsResult.Message, null);
+                    if (!result.Success) ShowHotspotDiagnosis("核心监控启动失败:\n" + result.Message, null);
                 }
             }
             catch (Exception ex)
             {
-                ShowHotspotDiagnosis("TTL 跳数监控启动失败:\n" + ex.Message, null);
+                ShowHotspotDiagnosis("核心监控启动失败:\n" + ex.Message, null);
             }
         }
 

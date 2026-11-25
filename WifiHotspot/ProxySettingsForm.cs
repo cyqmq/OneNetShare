@@ -952,7 +952,7 @@ namespace WifiHotspot
         private void ToggleMonitor(object sender, EventArgs e)
         {
             lblResult.Text = TrafficMonitor.Shared.IsRunning || DnsMonitor.Shared.IsRunning
-                ? TrafficMonitor.Shared.Stop().Message + "；" + DnsMonitor.Shared.Stop().Message
+                ? TrafficMonitor.Shared.Stop().Message
                 : ApplyMonitor(Collect());
             lblMonitorStatus.Text = MonitorStatusText();
         }
@@ -971,13 +971,10 @@ namespace WifiHotspot
 
         private static string ApplyMonitor(ProxySettings settings)
         {
-            string ttl = !settings.MonitorEnabled || !settings.MonitorTtl
-                ? TrafficMonitor.Shared.Stop().Message
-                : TrafficMonitor.Shared.Start(settings).Message;
-            string dns = !settings.MonitorEnabled || !settings.MonitorDns
-                ? DnsMonitor.Shared.Stop().Message
-                : DnsMonitor.Shared.Start(settings).Message;
-            return ttl + "；" + dns;
+            string stopped = TrafficMonitor.Shared.Stop().Message;
+            if (!settings.MonitorEnabled || (!settings.MonitorTtl && !settings.MonitorDns))
+                return stopped;
+            return stopped + "；" + TrafficMonitor.Shared.Start(settings).Message;
         }
 
         private static string MonitorStatusText()

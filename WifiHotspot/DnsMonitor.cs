@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.IO;
 using System.Net;
 using System.Net.NetworkInformation;
-using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 
@@ -11,21 +10,14 @@ namespace WifiHotspot
 {
     public class DnsMonitor
     {
-        private const int BufferSize = 65575;
-        private const int LayerNetwork = 0;
-        private const ulong FlagSniff = 0x0001;
-        private const uint FlagOutbound = 1u << 17;
-        private const uint FlagLoopback = 1u << 18;
-        private const uint FlagImpostor = 1u << 19;
         private const int PendingWindowSeconds = 4;
         private static readonly DnsMonitor SharedInstance = new DnsMonitor();
         private static readonly object LogLock = new object();
         private static readonly object StateLock = new object();
 
-        private IntPtr _handle = IntPtr.Zero;
-        private Thread _thread;
         private volatile bool _running;
         private string _lastMessage = "未运行";
+        private DateTime _lastSweep = DateTime.UtcNow;
         private readonly HashSet<string> _localIPs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, DateTime> _pending = new Dictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase);
         private long _phoneQueries;
@@ -38,25 +30,6 @@ namespace WifiHotspot
         {
             get { return SharedInstance; }
         }
-
-        [StructLayout(LayoutKind.Sequential)]
-        private struct WinDivertAddress
-        {
-            public long Timestamp;
-            public uint Flags;
-            public uint Reserved2;
-            [MarshalAs(UnmanagedType.ByValArray, SizeConst = 64)]
-            public byte[] Reserved3;
-        }
-
-        [DllImport("WinDivert.dll", EntryPoint = "WinDivertOpen", CallingConvention = CallingConvention.Cdecl, CharSet = CharSet.Ansi, SetLastError = true)]
-        private static extern IntPtr WinDivertOpen(string filter, int layer, short priority, ulong flags);
-
-        [DllImport("WinDivert.dll", EntryPoint = "WinDivertRecv", CallingConvention = CallingConvention.Cdecl, SetLastError = true)]
-        private static extern bool WinDivertRecv(IntPtr handle, IntPtr packet, uint packetLen, out uint recvLen, ref WinDivertAddress address);
-
-        [DllImport("WinDivert.dll", EntryPoint = "WinDivertClose", CallingConvention = CallingConvention.Cdecl, SetLastError = true)]
-        private static extern bool WinDivertClose(IntPtr handle);
 
         private class PacketInfo
         {
@@ -98,122 +71,61 @@ namespace WifiHotspot
 
         public HotspotResult Start(ProxySettings settings)
         {
-            if (_running)
-            {
-                _lastMessage = "DNS 端口监控已在运行";
-                return new HotspotResult { Success = true, Message = _lastMessage };
-            }
             if (settings == null || !settings.MonitorEnabled || !settings.MonitorDns)
             {
                 _lastMessage = "DNS 端口监控未启用";
                 return new HotspotResult { Success = true, Message = _lastMessage };
             }
-            if (!HotspotManager.IsAdministrator())
-            {
-                _lastMessage = "DNS 端口监控需要管理员权限";
-                return new HotspotResult { Success = false, Message = _lastMessage };
-            }
-            if (!NetworkNormalizer.DriverAvailable())
-            {
-                _lastMessage = "DNS 端口监控缺少 WinDivert 文件";
-                return new HotspotResult { Success = false, Message = _lastMessage };
-            }
-
-            try
-            {
-                _handle = WinDivertOpen("udp.SrcPort == 53 or udp.DstPort == 53", LayerNetwork, 0, FlagSniff);
-                if (_handle == IntPtr.Zero || _handle == new IntPtr(-1))
-                {
-                    int error = Marshal.GetLastWin32Error();
-                    _lastMessage = "WinDivert UDP:53 sniff 打开失败，错误码 " + error;
-                    WriteProbe("[probe][监控] " + _lastMessage);
-                    return new HotspotResult { Success = false, Message = _lastMessage };
-                }
-            }
-            catch (Exception ex)
-            {
-                _lastMessage = "DNS 端口监控初始化失败: " + ex.Message;
-                WriteProbe("[probe][监控] " + _lastMessage);
-                return new HotspotResult { Success = false, Message = _lastMessage };
-            }
-
-            RefreshLocalIPs();
-            lock (StateLock)
-            {
-                _pending.Clear();
-            }
-            _running = true;
-            _thread = new Thread(new ThreadStart(delegate { Loop(_handle); }));
-            _thread.IsBackground = true;
-            _thread.Start();
-            _lastMessage = "DNS 端口监控已启动（WinDivert 只读 sniff UDP:53）";
-            WriteProbe("[probe][监控] " + _lastMessage);
+            StartObserver(settings);
             return new HotspotResult { Success = true, Message = _lastMessage };
         }
 
         public HotspotResult Stop()
         {
-            if (!_running)
-            {
-                _lastMessage = "DNS 端口监控未运行";
-                return new HotspotResult { Success = true, Message = _lastMessage };
-            }
-            _running = false;
-            if (_thread != null && _thread.IsAlive) _thread.Join(2000);
-            CloseHandle();
-            _lastMessage = "DNS 端口监控已停止";
-            WriteProbe("[probe][监控] " + _lastMessage);
+            StopObserver();
             return new HotspotResult { Success = true, Message = _lastMessage };
         }
 
-        private void Loop(IntPtr handle)
+        internal void StartObserver(ProxySettings settings)
         {
-            IntPtr buffer = Marshal.AllocHGlobal(BufferSize);
-            byte[] managed = new byte[BufferSize];
-            DateTime lastSweep = DateTime.UtcNow;
-            try
+            if (_running) return;
+            if (settings == null || !settings.MonitorEnabled || !settings.MonitorDns) return;
+            RefreshLocalIPs();
+            lock (StateLock)
             {
-                while (_running && handle != IntPtr.Zero && handle != new IntPtr(-1))
-                {
-                    WinDivertAddress address = NewAddress();
-                    uint received;
-                    if (!WinDivertRecv(handle, buffer, BufferSize, out received, ref address))
-                    {
-                        if (!_running) break;
-                        Thread.Sleep(5);
-                        continue;
-                    }
-                    if (received == 0 || received > BufferSize) continue;
-                    if ((address.Flags & (FlagLoopback | FlagImpostor)) != 0) continue;
-                    Marshal.Copy(buffer, managed, 0, (int)received);
-                    Observe(managed, (int)received, (address.Flags & FlagOutbound) != 0);
-                    if (DateTime.UtcNow - lastSweep > TimeSpan.FromSeconds(1))
-                    {
-                        SweepPending();
-                        lastSweep = DateTime.UtcNow;
-                    }
-                }
+                _pending.Clear();
             }
-            catch (Exception ex)
-            {
-                WriteProbe("[probe][监控] DNS 读取异常: " + ex.Message);
-            }
-            finally
-            {
-                Marshal.FreeHGlobal(buffer);
-            }
+            _lastSweep = DateTime.UtcNow;
+            _running = true;
+            _lastMessage = "DNS 端口监控已启动（复用统一 WinDivert 只读 sniff）";
+            WriteProbe("[probe][监控] " + _lastMessage);
         }
 
-        private static WinDivertAddress NewAddress()
+        internal void StopObserver()
         {
-            return new WinDivertAddress { Reserved3 = new byte[64] };
+            if (!_running) return;
+            _running = false;
+            lock (StateLock)
+            {
+                _pending.Clear();
+            }
+            _lastMessage = "DNS 端口监控已停止";
+            WriteProbe("[probe][监控] " + _lastMessage);
         }
 
-        private void CloseHandle()
+        internal void ObserveExternal(byte[] packet, int length, bool outbound)
         {
-            if (_handle == IntPtr.Zero || _handle == new IntPtr(-1)) return;
-            try { WinDivertClose(_handle); } catch { }
-            _handle = IntPtr.Zero;
+            if (!_running) return;
+            Observe(packet, length, outbound);
+        }
+
+        internal void Tick()
+        {
+            if (!_running) return;
+            DateTime now = DateTime.UtcNow;
+            if (now - _lastSweep <= TimeSpan.FromSeconds(1)) return;
+            _lastSweep = now;
+            SweepPending();
         }
 
         private void RefreshLocalIPs()
@@ -234,6 +146,7 @@ namespace WifiHotspot
             PacketInfo info;
             DnsInfo dns;
             if (!TryParsePacket(packet, length, out info)) return;
+            if (info.SourcePort != 53 && info.DestinationPort != 53) return;
             if (!TryParseDNS(packet, length, info.PayloadOffset, out dns)) return;
             string name = string.IsNullOrEmpty(dns.Name) ? "-" : dns.Name;
 

@@ -25,6 +25,8 @@ namespace WifiHotspot
         private IntPtr _handle = IntPtr.Zero;
         private Thread _thread;
         private volatile bool _running;
+        private volatile bool _ttlEnabled;
+        private volatile bool _dnsEnabled;
         private string _lastMessage = "未运行";
         private readonly HashSet<string> _localIPs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, FlowRecord> _inbound = new Dictionary<string, FlowRecord>();
@@ -91,7 +93,9 @@ namespace WifiHotspot
             get
             {
                 return (_running ? "运行" : "未运行") +
-                       "；入站=" + Interlocked.Read(ref _inboundCount) +
+                       "；TTL=" + (_ttlEnabled ? "开" : "关") +
+                       " DNS=" + (_dnsEnabled ? "开" : "关") +
+                       " 入站=" + Interlocked.Read(ref _inboundCount) +
                        " 出站=" + Interlocked.Read(ref _outboundCount) +
                        " 差异=" + Interlocked.Read(ref _mismatchCount) +
                        " 保持=" + Interlocked.Read(ref _matchedCount);
@@ -102,74 +106,84 @@ namespace WifiHotspot
         {
             if (_running)
             {
-                _lastMessage = "TTL 跳数监控已在运行";
+                _lastMessage = "核心监控已在运行";
                 return new HotspotResult { Success = true, Message = _lastMessage };
             }
-            if (settings == null || !settings.MonitorEnabled || !settings.MonitorTtl)
+            bool ttl = settings != null && settings.MonitorEnabled && settings.MonitorTtl && !settings.TunEnabled;
+            bool dns = settings != null && settings.MonitorEnabled && settings.MonitorDns;
+            if (!ttl && !dns)
             {
-                _lastMessage = "TTL 跳数监控未启用";
-                return new HotspotResult { Success = true, Message = _lastMessage };
-            }
-            if (settings.TunEnabled)
-            {
-                _lastMessage = "全局 TUN 接管已启用，TTL 监控跳过";
+                _lastMessage = settings != null && settings.MonitorEnabled && settings.MonitorTtl && settings.TunEnabled
+                    ? "全局 TUN 接管已启用且 DNS 监控未启用，核心监控跳过"
+                    : "核心监控未启用";
                 return new HotspotResult { Success = true, Message = _lastMessage };
             }
             if (!HotspotManager.IsAdministrator())
             {
-                _lastMessage = "TTL 跳数监控需要管理员权限";
+                _lastMessage = "核心监控需要管理员权限";
                 return new HotspotResult { Success = false, Message = _lastMessage };
             }
             if (!NetworkNormalizer.DriverAvailable())
             {
-                _lastMessage = "TTL 跳数监控缺少 WinDivert 文件";
+                _lastMessage = "核心监控缺少 WinDivert 文件";
                 return new HotspotResult { Success = false, Message = _lastMessage };
             }
 
+            string filter = ttl ? "ip or ipv6" : "udp.SrcPort == 53 or udp.DstPort == 53";
             try
             {
-                _handle = WinDivertOpen("ip or ipv6", LayerNetwork, 0, FlagSniff);
+                _handle = WinDivertOpen(filter, LayerNetwork, 0, FlagSniff);
                 if (_handle == IntPtr.Zero || _handle == new IntPtr(-1))
                 {
                     int error = Marshal.GetLastWin32Error();
-                    _lastMessage = "WinDivert sniff 打开失败，错误码 " + error;
+                    _lastMessage = "WinDivert sniff 打开失败，错误码 " + error + " filter=" + filter;
                     WriteProbe("[probe][监控] " + _lastMessage);
                     return new HotspotResult { Success = false, Message = _lastMessage };
                 }
             }
             catch (Exception ex)
             {
-                _lastMessage = "TTL 跳数监控初始化失败: " + ex.Message;
+                _lastMessage = "核心监控初始化失败: " + ex.Message;
                 WriteProbe("[probe][监控] " + _lastMessage);
                 return new HotspotResult { Success = false, Message = _lastMessage };
             }
 
-            RefreshLocalIPs();
-            lock (StateLock)
+            _ttlEnabled = ttl;
+            _dnsEnabled = dns;
+            if (dns) DnsMonitor.Shared.StartObserver(settings);
+            if (ttl)
             {
-                _inbound.Clear();
-                _lastLogged.Clear();
+                RefreshLocalIPs();
+                lock (StateLock)
+                {
+                    _inbound.Clear();
+                    _lastLogged.Clear();
+                }
             }
             _running = true;
             _thread = new Thread(new ThreadStart(delegate { Loop(_handle); }));
             _thread.IsBackground = true;
             _thread.Start();
-            _lastMessage = "TTL 跳数监控已启动（WinDivert 只读 sniff）";
+            _lastMessage = "核心监控已启动（WinDivert 只读 sniff；TTL=" + (ttl ? "开" : "关") +
+                           " DNS=" + (dns ? "开" : "关") + "）";
             WriteProbe("[probe][监控] " + _lastMessage);
             return new HotspotResult { Success = true, Message = _lastMessage };
         }
 
         public HotspotResult Stop()
         {
-            if (!_running)
+            if (!_running && !DnsMonitor.Shared.IsRunning)
             {
-                _lastMessage = "TTL 跳数监控未运行";
+                _lastMessage = "核心监控未运行";
                 return new HotspotResult { Success = true, Message = _lastMessage };
             }
             _running = false;
+            _ttlEnabled = false;
+            _dnsEnabled = false;
+            DnsMonitor.Shared.StopObserver();
             if (_thread != null && _thread.IsAlive) _thread.Join(2000);
             CloseHandle();
-            _lastMessage = "TTL 跳数监控已停止";
+            _lastMessage = "核心监控已停止";
             WriteProbe("[probe][监控] " + _lastMessage);
             return new HotspotResult { Success = true, Message = _lastMessage };
         }
@@ -178,6 +192,7 @@ namespace WifiHotspot
         {
             IntPtr buffer = Marshal.AllocHGlobal(BufferSize);
             byte[] managed = new byte[BufferSize];
+            DateTime lastTick = DateTime.UtcNow;
             try
             {
                 while (_running && handle != IntPtr.Zero && handle != new IntPtr(-1))
@@ -187,6 +202,7 @@ namespace WifiHotspot
                     if (!WinDivertRecv(handle, buffer, BufferSize, out received, ref address))
                     {
                         if (!_running) break;
+                        DnsMonitor.Shared.Tick();
                         Thread.Sleep(5);
                         continue;
                     }
@@ -194,11 +210,17 @@ namespace WifiHotspot
                     if ((address.Flags & (FlagLoopback | FlagImpostor)) != 0) continue;
                     Marshal.Copy(buffer, managed, 0, (int)received);
                     Observe(managed, (int)received, address);
+                    DateTime now = DateTime.UtcNow;
+                    if (now - lastTick > TimeSpan.FromSeconds(1))
+                    {
+                        DnsMonitor.Shared.Tick();
+                        lastTick = now;
+                    }
                 }
             }
             catch (Exception ex)
             {
-                WriteProbe("[probe][监控] TTL 读取异常: " + ex.Message);
+                WriteProbe("[probe][监控] 核心监控读取异常: " + ex.Message);
             }
             finally
             {
@@ -233,9 +255,12 @@ namespace WifiHotspot
 
         private void Observe(byte[] packet, int length, WinDivertAddress address)
         {
+            bool outbound = (address.Flags & FlagOutbound) != 0;
+            if (_dnsEnabled) DnsMonitor.Shared.ObserveExternal(packet, length, outbound);
+            if (!_ttlEnabled) return;
+
             FlowInfo info;
             if (!TryParsePacket(packet, length, out info)) return;
-            bool outbound = (address.Flags & FlagOutbound) != 0;
             uint interfaceIndex = ReadU32(address.Reserved3, 0);
 
             if (outbound)
