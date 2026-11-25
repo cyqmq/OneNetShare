@@ -15,9 +15,28 @@ namespace WifiHotspot
 
         public static bool IsRunning()
         {
-            Process[] processes = Process.GetProcessesByName("hotspot-proxy");
-            foreach (Process process in processes) process.Dispose();
-            return processes.Length > 0;
+            try
+            {
+                var request = (HttpWebRequest)WebRequest.Create("http://127.0.0.1:18089/status");
+                request.Method = "GET";
+                request.Timeout = 700;
+                request.ReadWriteTimeout = 700;
+                using (HttpWebResponse response = (HttpWebResponse)request.GetResponse())
+                {
+                    if ((int)response.StatusCode >= 200 && (int)response.StatusCode < 300) return true;
+                }
+            }
+            catch { }
+
+            string[] names = { "hotspot-proxy", "hotspot-proxy-win-x86", "hotspot-proxy-openwrt-x86", "hotspot-proxy-openwrt-mipsle" };
+            foreach (string name in names)
+            {
+                Process[] processes = Process.GetProcessesByName(name);
+                int count = processes.Length;
+                foreach (Process process in processes) process.Dispose();
+                if (count > 0) return true;
+            }
+            return false;
         }
 
         public static string Start(string configPath)
@@ -52,8 +71,11 @@ namespace WifiHotspot
             bool graceful = false;
             try
             {
-                using (var client = new WebClient())
-                    client.DownloadString("http://127.0.0.1:18089/shutdown");
+                var request = (HttpWebRequest)WebRequest.Create("http://127.0.0.1:18089/shutdown");
+                request.Method = "GET";
+                request.Timeout = 1500;
+                request.ReadWriteTimeout = 1500;
+                using (HttpWebResponse response = (HttpWebResponse)request.GetResponse()) { }
                 graceful = true;
                 Thread.Sleep(800);
             }

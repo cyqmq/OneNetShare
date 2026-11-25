@@ -184,7 +184,7 @@ namespace WifiHotspot
             lblResult = new Label { Location = new Point(12, 840), Size = new Size(640, 30), ForeColor = Color.DarkGreen };
             lblResult.Text = (ProxyProcessManager.IsRunning() ? "代理运行" : "代理未运行") +
                              "；Wintun.dll " + (HotspotManager.WintunAvailable() ? "存在" : "缺失") +
-                             "；网络层归一化 " + (NetworkNormalizer.Shared.IsRunning ? "运行" : "未运行");
+                             "；网络层归一化 " + (NetworkNormalizer.Shared.IsRunning ? "运行" : "未运行（" + NetworkNormalizer.Shared.LastMessage + "）");
 
             var panel = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 48, FlowDirection = FlowDirection.RightToLeft, WrapContents = false, Padding = new Padding(8, 8, 8, 8) };
             var btnClose = NewButton("关闭");

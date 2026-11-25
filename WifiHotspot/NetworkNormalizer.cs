@@ -17,6 +17,7 @@ namespace WifiHotspot
         private Thread _networkThread;
         private Thread _forwardThread;
         private volatile bool _running;
+        private string _lastMessage = "未运行";
         private int _ipIdCounter = 0x4000;
         private static readonly NetworkNormalizer SharedInstance = new NetworkNormalizer();
 
@@ -55,6 +56,11 @@ namespace WifiHotspot
             get { return _running; }
         }
 
+        public string LastMessage
+        {
+            get { return _lastMessage; }
+        }
+
         public static bool DriverAvailable()
         {
             string dir = AppDomain.CurrentDomain.BaseDirectory;
@@ -64,10 +70,26 @@ namespace WifiHotspot
 
         public HotspotResult Start(ProxySettings settings)
         {
-            if (_running) return new HotspotResult { Success = true, Message = "网络层归一化已在运行" };
-            if (settings == null || !settings.NetworkEnabled) return new HotspotResult { Success = true, Message = "网络层归一化未启用" };
-            if (!HotspotManager.IsAdministrator()) return new HotspotResult { Success = false, Message = "网络层归一化需要管理员权限" };
-            if (!DriverAvailable()) return new HotspotResult { Success = false, Message = "未找到 WinDivert.dll。请把 WinDivert 2.x 的 WinDivert.dll、WinDivert.sys 与对应架构驱动放到程序目录后重试。" };
+            if (_running)
+            {
+                _lastMessage = "网络层归一化已在运行";
+                return new HotspotResult { Success = true, Message = _lastMessage };
+            }
+            if (settings == null || !settings.NetworkEnabled)
+            {
+                _lastMessage = "网络层归一化未启用";
+                return new HotspotResult { Success = true, Message = _lastMessage };
+            }
+            if (!HotspotManager.IsAdministrator())
+            {
+                _lastMessage = "网络层归一化需要管理员权限";
+                return new HotspotResult { Success = false, Message = _lastMessage };
+            }
+            if (!DriverAvailable())
+            {
+                _lastMessage = "未找到 WinDivert.dll。请把 WinDivert 2.x 的 WinDivert.dll、WinDivert.sys 与对应架构驱动放到程序目录后重试。";
+                return new HotspotResult { Success = false, Message = _lastMessage };
+            }
 
             try
             {
@@ -78,24 +100,31 @@ namespace WifiHotspot
             catch (Exception ex)
             {
                 CloseHandles();
-                return new HotspotResult { Success = false, Message = "WinDivert 初始化失败: " + ex.Message + "\n需要以管理员权限运行，并确认 WinDivert 驱动已安装。" };
+                _lastMessage = "WinDivert 初始化失败: " + ex.Message + "\n需要以管理员权限运行，并确认 WinDivert 驱动已安装。";
+                return new HotspotResult { Success = false, Message = _lastMessage };
             }
 
             _running = true;
             _networkThread = StartThread(_networkHandle, settings);
             if (_forwardHandle != IntPtr.Zero)
                 _forwardThread = StartThread(_forwardHandle, settings);
-            return new HotspotResult { Success = true, Message = "网络层指纹归一化已启动" };
+            _lastMessage = "网络层指纹归一化已启动";
+            return new HotspotResult { Success = true, Message = _lastMessage };
         }
 
         public HotspotResult Stop()
         {
-            if (!_running) return new HotspotResult { Success = true, Message = "网络层归一化未运行" };
+            if (!_running)
+            {
+                _lastMessage = "网络层归一化未运行";
+                return new HotspotResult { Success = true, Message = _lastMessage };
+            }
             _running = false;
             if (_networkThread != null && _networkThread.IsAlive) _networkThread.Join(3000);
             if (_forwardThread != null && _forwardThread.IsAlive) _forwardThread.Join(3000);
             CloseHandles();
-            return new HotspotResult { Success = true, Message = "网络层指纹归一化已停止" };
+            _lastMessage = "网络层指纹归一化已停止";
+            return new HotspotResult { Success = true, Message = _lastMessage };
         }
 
         private static IntPtr OpenLayer(int layer)

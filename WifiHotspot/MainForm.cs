@@ -152,9 +152,7 @@ namespace WifiHotspot
             }
 
             lblStatus.ForeColor = color;
-            lblStatus.Text = string.Format("热点状态: {0}\n支持检测: {1}\n代理/网络层: {2} / {3}", statusText, support.Message,
-                ProxyProcessManager.IsRunning() ? "运行" : "未运行",
-                NetworkNormalizer.Shared.IsRunning ? "运行" : "未运行");
+            lblStatus.Text = string.Format("热点状态: {0}\n支持检测: {1}\n代理/网络层: {2}", statusText, support.Message, ModuleStatusText());
         }
 
         private void ShowHotspotDiagnosis(string message, IcsManager.NetworkAdapterInfo adapter)
@@ -299,13 +297,32 @@ namespace WifiHotspot
             txtPassword.PasswordChar = chkShowPassword.Checked ? '\0' : '*';
         }
 
+        private static string ModuleStatusText()
+        {
+            string proxy = ProxyProcessManager.IsRunning() ? "运行" : "未运行";
+            string network;
+            if (NetworkNormalizer.Shared.IsRunning)
+            {
+                network = "运行";
+            }
+            else
+            {
+                string message = NetworkNormalizer.Shared.LastMessage ?? string.Empty;
+                if (message.Contains("未启用")) network = "未运行(未启用)";
+                else if (message.Contains("WinDivert.dll")) network = "未运行(缺 WinDivert.dll)";
+                else if (message.Contains("管理员")) network = "未运行(需管理员)";
+                else if (message.Contains("初始化失败")) network = "未运行(初始化失败)";
+                else network = "未运行";
+            }
+            return proxy + " / " + network;
+        }
+
         private void timerStatus_Tick(object sender, EventArgs e)
         {
             string detail;
             HotspotStatus status = _manager.GetStatus(out detail);
             bool isAdmin = HotspotManager.IsAdministrator();
-            string moduleState = (ProxyProcessManager.IsRunning() ? "运行" : "未运行") + " / " +
-                                  (NetworkNormalizer.Shared.IsRunning ? "运行" : "未运行");
+            string moduleState = ModuleStatusText();
 
             if (status == HotspotStatus.Running)
             {
