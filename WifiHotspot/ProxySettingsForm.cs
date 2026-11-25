@@ -43,6 +43,7 @@ namespace WifiHotspot
         private readonly ComboBox cmbTunUpstream;
         private readonly ComboBox cmbProfile;
         private readonly ComboBox cmbUaPreset;
+        private readonly ComboBox cmbIpv6Policy;
         private readonly TextBox txtProbeLog;
         private readonly System.Windows.Forms.Timer probeTimer;
         private long _probeLogOffset;
@@ -62,10 +63,10 @@ namespace WifiHotspot
             ClientSize = new Size(680, 760);
             Font = new Font("Microsoft YaHei", 9F, FontStyle.Regular, GraphicsUnit.Point, 134);
 
-            var content = new Panel { Dock = DockStyle.Fill, AutoScroll = true, AutoScrollMinSize = new Size(0, 880) };
-            var implemented = new GroupBox { Text = "已实现功能", Location = new Point(12, 12), Size = new Size(640, 460) };
-            var missing = new GroupBox { Text = "未实现功能", Location = new Point(12, 480), Size = new Size(640, 100) };
-            var note = new Label { Location = new Point(15, 425), Size = new Size(600, 30), ForeColor = Color.Gray };
+            var content = new Panel { Dock = DockStyle.Fill, AutoScroll = true, AutoScrollMinSize = new Size(0, 900) };
+            var implemented = new GroupBox { Text = "已实现功能", Location = new Point(12, 12), Size = new Size(640, 480) };
+            var missing = new GroupBox { Text = "未实现功能", Location = new Point(12, 500), Size = new Size(640, 100) };
+            var note = new Label { Location = new Point(15, 447), Size = new Size(600, 30), ForeColor = Color.Gray };
             note.Text = "Wintun 全局 TUN 接管开启后，UDP/DNS/NTP 经虚拟网卡进入代理；HTTP Header 仍需代理转发。TUN 与 WinDivert 网络层归一化互斥。TTL 会随设备指纹自动填入推荐值。";
 
             var lblMode = new Label { Location = new Point(15, 28), AutoSize = true, Text = "运行模式: forward (Windows)" };
@@ -121,6 +122,16 @@ namespace WifiHotspot
             cmbUaPreset.ValueMember = "Key";
             cmbUaPreset.SelectedValue = uaPresets.ContainsKey(settings.UAPreset) ? settings.UAPreset : "chrome-158-windows";
             var lblUserAgentHint = new Label { Location = new Point(550, 390), Size = new Size(85, 32), ForeColor = Color.Gray, Text = "内置 UA 库，自动对齐 Client Hints" };
+            var lblIPv6Policy = new Label { Location = new Point(15, 423), AutoSize = true, Text = "IPv6 策略:" };
+            cmbIpv6Policy = new ComboBox { Location = new Point(95, 420), Size = new Size(450, 23), DropDownStyle = ComboBoxStyle.DropDownList };
+            var ipv6Policies = ProxyConfigManager.GetIPv6Policies();
+            var ipv6PolicyList = new List<KeyValuePair<string, string>>();
+            foreach (KeyValuePair<string, string> item in ipv6Policies) ipv6PolicyList.Add(item);
+            cmbIpv6Policy.DataSource = ipv6PolicyList;
+            cmbIpv6Policy.DisplayMember = "Value";
+            cmbIpv6Policy.ValueMember = "Key";
+            cmbIpv6Policy.SelectedValue = ipv6Policies.ContainsKey(settings.IPv6Policy) ? settings.IPv6Policy : "block";
+            var lblIPv6Hint = new Label { Location = new Point(550, 420), Size = new Size(85, 32), ForeColor = Color.DarkRed, Text = "IPv6 无 NAT，默认封禁转发" };
 
             chkTun.CheckedChanged += delegate { chkNetwork.Enabled = !chkTun.Checked; };
             chkNetwork.Enabled = !settings.TunEnabled;
@@ -168,6 +179,9 @@ namespace WifiHotspot
             implemented.Controls.Add(lblUserAgent);
             implemented.Controls.Add(cmbUaPreset);
             implemented.Controls.Add(lblUserAgentHint);
+            implemented.Controls.Add(lblIPv6Policy);
+            implemented.Controls.Add(cmbIpv6Policy);
+            implemented.Controls.Add(lblIPv6Hint);
             implemented.Controls.Add(note);
 
             var chkWebRtc = NewCheck("WebRTC 本地 IP 防泄漏（未实现）", false, 15, 18);
@@ -183,7 +197,7 @@ namespace WifiHotspot
             missing.Controls.Add(chkTls);
             missing.Controls.Add(missingNote);
 
-            var grpProbe = new GroupBox { Text = "探针日志 / 连通性测试", Location = new Point(12, 583), Size = new Size(640, 250) };
+            var grpProbe = new GroupBox { Text = "探针日志 / 连通性测试", Location = new Point(12, 603), Size = new Size(640, 250) };
             txtProbeLog = new TextBox { Multiline = true, ReadOnly = true, Dock = DockStyle.Fill, ScrollBars = ScrollBars.Vertical, BackColor = Color.White, Font = new Font("Consolas", 9F) };
             var probePanel = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 44, FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(6, 6, 6, 6) };
             var btnTest = NewButton("一键连通性测试", 150);
@@ -198,10 +212,11 @@ namespace WifiHotspot
             grpProbe.Controls.Add(txtProbeLog);
             grpProbe.Controls.Add(probePanel);
 
-            lblResult = new Label { Location = new Point(12, 840), Size = new Size(640, 30), ForeColor = Color.DarkGreen };
+            lblResult = new Label { Location = new Point(12, 860), Size = new Size(640, 30), ForeColor = Color.DarkGreen };
             lblResult.Text = (ProxyProcessManager.IsRunning() ? "代理运行" : "代理未运行") +
                              "；Wintun.dll " + (HotspotManager.WintunAvailable() ? "存在" : "缺失") +
-                             "；网络层归一化 " + (NetworkNormalizer.Shared.IsRunning ? "运行" : "未运行（" + NetworkNormalizer.Shared.LastMessage + "）");
+                             "；网络层归一化 " + (NetworkNormalizer.Shared.IsRunning ? "运行" : "未运行（" + NetworkNormalizer.Shared.LastMessage + "）") +
+                             "；IPv6 转发封禁 " + (IPv6Guard.IsRunning ? "运行" : (IPv6Guard.IsEnabled(settings.IPv6Policy) ? "未运行" : "未启用"));
 
             var panel = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 48, FlowDirection = FlowDirection.RightToLeft, WrapContents = false, Padding = new Padding(8, 8, 8, 8) };
             var btnClose = NewButton("关闭");
@@ -413,11 +428,13 @@ namespace WifiHotspot
         {
             string http = TestHttpRewrite();
             string tun = TestTunRoute();
+            string ipv6 = ProxyDiagnostics.CheckIPv6Safety();
             bool httpOK = http.StartsWith("HTTP 改写生效", StringComparison.Ordinal);
             bool tunOK = tun.StartsWith("TUN 路由正常", StringComparison.Ordinal) || tun.StartsWith("TUN 未开启", StringComparison.Ordinal);
-            return httpOK && tunOK
-                ? "全副武装，请放心冲浪；" + http + "；" + tun
-                : "仍需检查；" + http + "；" + tun;
+            bool ipv6OK = ipv6.StartsWith("IPv6 安全", StringComparison.Ordinal);
+            return httpOK && tunOK && ipv6OK
+                ? "全副武装，请放心冲浪；" + http + "；" + tun + "；" + ipv6
+                : "仍需检查；" + http + "；" + tun + "；" + ipv6;
         }
 
         private static Dictionary<string, string> GetProxyStatus()
@@ -654,7 +671,8 @@ namespace WifiHotspot
                 Mode = "forward",
                 Profile = cmbProfile.SelectedItem == null ? "chrome-win11" : cmbProfile.SelectedItem.ToString(),
                 UAPreset = cmbUaPreset.SelectedValue == null ? "" : cmbUaPreset.SelectedValue.ToString(),
-                UserAgentOverride = ""
+                UserAgentOverride = "",
+                IPv6Policy = cmbIpv6Policy.SelectedValue == null ? "block" : cmbIpv6Policy.SelectedValue.ToString()
             };
         }
 

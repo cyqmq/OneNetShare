@@ -217,6 +217,13 @@ namespace WifiHotspot
                         else if (settings.TunEnabled && !ProxyProcessManager.IsRunning())
                             ShowHotspotDiagnosis("全局 TUN 代理启动失败：\n" + proxyMessage, selected);
                     }
+                    if (IPv6Guard.IsEnabled(settings.IPv6Policy))
+                    {
+                        var ipv6Result = IPv6Guard.Start(settings.IPv6Policy);
+                        proxyMessage += "\n" + ipv6Result.Message;
+                        if (!ipv6Result.Success)
+                            ShowHotspotDiagnosis("IPv6 转发封禁启动失败：\n" + ipv6Result.Message, selected);
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -243,8 +250,10 @@ namespace WifiHotspot
                 string proxyMessage = string.Empty;
                 try
                 {
-                    if (ProxyConfigManager.Load().AutoStartProxy)
+                    ProxySettings settings = ProxyConfigManager.Load();
+                    if (settings.AutoStartProxy)
                         proxyMessage = "\n" + ProxyProcessManager.Stop();
+                    proxyMessage += "\n" + IPv6Guard.Stop().Message;
                 }
                 catch { }
                 MessageBox.Show(result.Message + proxyMessage, "停止结果", MessageBoxButtons.OK, MessageBoxIcon.Information);

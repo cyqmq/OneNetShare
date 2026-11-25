@@ -2,6 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Net;
+using System.Net.NetworkInformation;
+using System.Net.Sockets;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Web.Script.Serialization;
@@ -17,6 +20,7 @@ namespace WifiHotspot
             lines.Add(exitCode.HasValue ? "进程退出码: " + exitCode.Value : "进程状态: 未捕获退出码");
 
             AnalyzeConfig(configPath, lines);
+            AnalyzeIPv6(configPath, lines);
             AnalyzePorts(configPath, lines);
             AnalyzeLog(processOutput, lines);
             return string.Join("\n", lines.ToArray());
@@ -101,6 +105,75 @@ namespace WifiHotspot
                 if (!HotspotManager.IsAdministrator())
                     lines.Add("[错误] 已启用网络层归一化，但当前进程不是管理员权限。");
             }
+        }
+
+        private static void AnalyzeIPv6(string configPath, List<string> lines)
+        {
+            string path = string.IsNullOrEmpty(configPath) ? ProxyConfigManager.DefaultConfigPath : configPath;
+            string policy = "block";
+            if (File.Exists(path))
+            {
+                try
+                {
+                    object parsed = new JavaScriptSerializer().DeserializeObject(File.ReadAllText(path, Encoding.UTF8));
+                    IDictionary<string, object> root = parsed as IDictionary<string, object>;
+                    if (root != null) policy = GetString(root, "ipv6_policy", "block");
+                }
+                catch { }
+            }
+
+            lines.Add("IPv6 策略: " + policy + "；" + CheckIPv6Safety());
+            if (IPv6Guard.IsEnabled(policy) && !IPv6Guard.IsRunning)
+                lines.Add("[警告] 配置要求封禁 IPv6 转发，但 WinDivert 封禁当前未运行；热点启动后才会生效。");
+        }
+
+        public static string CheckIPv6Safety()
+        {
+            List<string> globalAddresses = FindHotspotGlobalIPv6();
+            if (IPv6Guard.IsRunning)
+                return "IPv6 安全: 转发封禁正在运行，客户端 GUA IPv6 无法经 Windows 转发" +
+                       (globalAddresses.Count > 0 ? "；热点网卡仍检测到 " + globalAddresses.Count + " 个全局 IPv6 地址" : "");
+
+            if (globalAddresses.Count == 0)
+                return "IPv6 安全: 未在热点虚拟网卡检测到全局 IPv6 地址";
+
+            return "IPv6 裸露风险: 热点虚拟网卡检测到全局 IPv6 地址 " + string.Join(", ", globalAddresses.ToArray()) +
+                   "；请启用“封禁全部 IPv6 转发”并重启热点";
+        }
+
+        private static List<string> FindHotspotGlobalIPv6()
+        {
+            var result = new List<string>();
+            string hotspotName = string.Empty;
+            try
+            {
+                var adapterInfo = new HotspotManager().GetHostedNetworkAdapter();
+                if (adapterInfo != null) hotspotName = adapterInfo.Name ?? string.Empty;
+            }
+            catch { }
+
+            foreach (NetworkInterface adapter in NetworkInterface.GetAllNetworkInterfaces())
+            {
+                string name = adapter.Name ?? string.Empty;
+                string description = adapter.Description ?? string.Empty;
+                bool hotspotAdapter = description.IndexOf("Hosted Network", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                                      description.IndexOf("承载网络", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                                      name.StartsWith("Local Area Connection*", StringComparison.OrdinalIgnoreCase) ||
+                                      name.StartsWith("本地连接*", StringComparison.OrdinalIgnoreCase) ||
+                                      (!string.IsNullOrEmpty(hotspotName) && string.Equals(name, hotspotName, StringComparison.OrdinalIgnoreCase));
+                if (!hotspotAdapter || adapter.OperationalStatus != OperationalStatus.Up) continue;
+
+                foreach (UnicastIPAddressInformation address in adapter.GetIPProperties().UnicastAddresses)
+                {
+                    if (address.Address.AddressFamily != AddressFamily.InterNetworkV6) continue;
+                    if (address.Address.IsIPv6LinkLocal || address.Address.IsIPv6SiteLocal) continue;
+                    byte[] bytes = address.Address.GetAddressBytes();
+                    bool uniqueLocal = (bytes[0] & 0xfe) == 0xfc;
+                    if (uniqueLocal) continue;
+                    if (!result.Contains(address.Address.ToString())) result.Add(address.Address.ToString());
+                }
+            }
+            return result;
         }
 
         private static void AnalyzePorts(string configPath, List<string> lines)

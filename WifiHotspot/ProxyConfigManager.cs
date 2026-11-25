@@ -36,6 +36,7 @@ namespace WifiHotspot
         public string Profile { get; set; }
         public string UAPreset { get; set; }
         public string UserAgentOverride { get; set; }
+        public string IPv6Policy { get; set; }
     }
 
     public static class ProxyConfigManager
@@ -93,7 +94,8 @@ namespace WifiHotspot
                 Mode = GetString(root, "mode", "forward"),
                 Profile = profile,
                 UAPreset = GetString(root, "ua_preset", ""),
-                UserAgentOverride = GetString(root, "user_agent_override", "")
+                UserAgentOverride = GetString(root, "user_agent_override", ""),
+                IPv6Policy = GetString(root, "ipv6_policy", "block")
             };
         }
 
@@ -152,6 +154,16 @@ namespace WifiHotspot
             };
         }
 
+        public static Dictionary<string, string> GetIPv6Policies()
+        {
+            return new Dictionary<string, string>
+            {
+                { "block", "封禁全部 IPv6 转发（推荐）" },
+                { "ula-only", "仅允许 ULA / Link-local" },
+                { "allow", "允许 IPv6（不安全）" }
+            };
+        }
+
         public static int RecommendedTTL(string profile)
         {
             string name = (profile ?? string.Empty).ToLowerInvariant();
@@ -174,6 +186,7 @@ namespace WifiHotspot
             SetString(root, "default_profile", string.IsNullOrEmpty(settings.Profile) ? "chrome-win11" : settings.Profile);
             SetString(root, "ua_preset", settings.UAPreset ?? "");
             SetString(root, "user_agent_override", settings.UserAgentOverride ?? "");
+            SetString(root, "ipv6_policy", string.IsNullOrEmpty(settings.IPv6Policy) ? "block" : settings.IPv6Policy);
             SetBool(root, "gui_auto_start_proxy", settings.AutoStartProxy);
 
             IDictionary<string, object> network = GetOrCreateDict(root, "network");
@@ -272,8 +285,10 @@ namespace WifiHotspot
   ""default_profile"": ""chrome-win11"",
   ""ua_preset"": ""chrome-158-windows"",
   ""user_agent_override"": """",
+  ""ipv6_policy"": ""block"",
   ""auto_reload"": true,
   ""gui_auto_start_proxy"": true,
+
   ""network"": { ""enabled"": false, ""ttl"": 128, ""ipid"": true, ""tcp_options"": true, ""forward"": true, ""mtu_clamp_enabled"": false, ""mss_clamp"": 1460 },
   ""tun"": { ""enabled"": false, ""name"": ""OneNetShare Tunnel"", ""ip"": ""10.66.0.1"", ""gateway_ip"": ""10.66.0.2"", ""prefix_len"": 24, ""route"": true, ""upstream_interface"": """", ""ttl"": 128 },
   ""log"": { ""level"": ""info"", ""file"": "" },
