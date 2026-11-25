@@ -12,6 +12,10 @@ HTTP_PORT="18080"
 HTTPS_PORT="18443"
 LAN_NET="$(uci -q get network.lan.ipaddr 2>/dev/null | cut -d. -f1-3).0/24"
 [ -z "$LAN_NET" ] && LAN_NET="192.168.1.0/24"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PORTAL_BLOCK_NO_AUTORUN=1
+. "$SCRIPT_DIR/portal-block.sh"
+unset PORTAL_BLOCK_NO_AUTORUN
 
 install_tun() {
     # 加载 tun 模块
@@ -61,6 +65,7 @@ EOF
     chmod +x /etc/init.d/hotspot-proxy
     /etc/init.d/hotspot-proxy enable
     /etc/init.d/hotspot-proxy start
+    install_portal_rules
     echo "TUN 模式已安装 (tun0: $TUN_IP)"
 }
 
@@ -69,11 +74,13 @@ install_tproxy() {
     iptables -t mangle -N HOTSPOT_TPROXY 2>/dev/null
     iptables -t mangle -F HOTSPOT_TPROXY
 
+    portal_mangle_returns
     iptables -t mangle -A HOTSPOT_TPROXY -d "$LAN_NET" -j RETURN
     iptables -t mangle -A HOTSPOT_TPROXY -p tcp --dport 80 -j TPROXY --on-port $HTTP_PORT --tproxy-mark 0x1
     iptables -t mangle -A HOTSPOT_TPROXY -p tcp --dport 443 -j TPROXY --on-port $HTTPS_PORT --tproxy-mark 0x1
     iptables -t mangle -A HOTSPOT_TPROXY -p udp -j TPROXY --on-port 18500 --tproxy-mark 0x1
     iptables -t mangle -I PREROUTING 1 -j HOTSPOT_TPROXY
+    install_portal_rules
 
     # 策略路由
     ip rule add fwmark 0x1 lookup 100 2>/dev/null
@@ -84,6 +91,7 @@ install_tproxy() {
 
 install_redirect() {
     sh "$(dirname "$0")/setup-openwrt.sh" install
+    iptables -t nat -I HOTSPOT_PROXY 1 -d 127.0.0.0/8 -j RETURN 2>/dev/null
     iptables -t nat -A HOTSPOT_PROXY -p udp --dport 53 -j REDIRECT --to-ports 18053 2>/dev/null
     iptables -t nat -A HOTSPOT_PROXY -p udp --dport 123 -j REDIRECT --to-ports 18123 2>/dev/null
     iptables -t nat -A HOTSPOT_PROXY -p udp --dport 443 -j REDIRECT --to-ports 18443 2>/dev/null
@@ -102,6 +110,7 @@ uninstall() {
     ip rule del pref 200 lookup 101 2>/dev/null
     ip route del default dev tun0 table 101 2>/dev/null
     ip rule del fwmark 0x2 lookup main pref 100 2>/dev/null
+    remove_portal_rules
     sh "$(dirname "$0")/setup-openwrt.sh" uninstall
     echo "已卸载"
 }

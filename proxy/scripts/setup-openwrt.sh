@@ -8,16 +8,21 @@ HTTP_PORT="18080"
 HTTPS_PORT="18443"
 LAN_NET="$(uci -q get network.lan.ipaddr 2>/dev/null | cut -d. -f1-3).0/24"
 [ -z "$LAN_NET" ] && LAN_NET="192.168.1.0/24"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PORTAL_BLOCK_NO_AUTORUN=1
+. "$SCRIPT_DIR/portal-block.sh"
+unset PORTAL_BLOCK_NO_AUTORUN
 
 install_rules() {
     iptables -t nat -N HOTSPOT_PROXY 2>/dev/null
     iptables -t nat -F HOTSPOT_PROXY
 
+    portal_nat_returns
+    iptables -t nat -A HOTSPOT_PROXY -d 127.0.0.0/8 -j RETURN
     iptables -t nat -A HOTSPOT_PROXY -p tcp --dport 80 -j REDIRECT --to-ports $HTTP_PORT
     iptables -t nat -A HOTSPOT_PROXY -p tcp --dport 443 -j REDIRECT --to-ports $HTTPS_PORT
-    # bypass proxy's own outbound connections and loopback
-    iptables -t nat -A HOTSPOT_PROXY -d 127.0.0.0/8 -j RETURN
     iptables -t nat -I PREROUTING 1 -s "$LAN_NET" -p tcp -j HOTSPOT_PROXY
+    install_portal_rules
 
     echo "iptables REDIRECT 规则已安装 (LAN=$LAN_NET)"
 }
@@ -26,6 +31,7 @@ remove_rules() {
     iptables -t nat -D PREROUTING -s "$LAN_NET" -p tcp -j HOTSPOT_PROXY 2>/dev/null
     iptables -t nat -F HOTSPOT_PROXY 2>/dev/null
     iptables -t nat -X HOTSPOT_PROXY 2>/dev/null
+    remove_portal_rules
     echo "iptables REDIRECT 规则已移除"
 }
 
@@ -69,6 +75,7 @@ case "$1" in
     status)
         ps | grep '[h]otspot-proxy' || echo "进程未运行"
         iptables -t nat -L HOTSPOT_PROXY -n -v 2>/dev/null || echo "规则未安装"
+        portal_block_status
         ;;
     *)
         echo "用法: $0 {install|uninstall|rules-only|status}"

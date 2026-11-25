@@ -129,3 +129,13 @@ ping -c 3 1.1.1.1
 - `fw4 check` 报错：检查 `.nft` 片段语法，确认分号与空格。
 - 脚本提示"未检测到 nftables 或 iptables"：确认已安装 `nft` 或 `iptables` 且内核模块加载。
 - 规则生效但客户端仍异常：确认 WAN 接口名正确（`ip link` 查看），或尝试留空作用于全部出口。
+
+## 认证网关 portal 封堵
+
+手机连接后后台弹出认证门户时，必须同时拦网关主 IP 和第二个 IP。配合 `proxy/scripts/portal-block.sh` 使用：
+
+```sh
+PORTAL_PRIMARY_IP=10.0.0.1 PORTAL_SECONDARY_IP=10.0.0.2 sh /root/portal-block.sh install
+```
+
+顺序陷阱：REDIRECT/TPROXY 在 nat/mangle 表，先于 filter FORWARD。只在 FORWARD DROP，重定向后的流量不会走 FORWARD，计数器永远是 0。脚本会先在 nat/mangle 中对 portal IP `RETURN`，再安装 `HOTSPOT_PORTAL` DROP 链；`setup-openwrt.sh` / `setup-capture.sh` 已默认调用该顺序。

@@ -189,22 +189,25 @@ Windows 网络层归一化使用 WinDivert 2.x：Windows 发行包已附带官�
 
 ```sh
 scp build/hotspot-proxy-openwrt-x86 root@192.168.1.1:/usr/bin/hotspot-proxy
-scp scripts/setup-openwrt.sh scripts/setup-capture.sh configs/config.json root@192.168.1.1:/root/
-ssh root@192.168.1.1 'sh /root/setup-openwrt.sh install'
-ssh root@192.168.1.1 'sh /root/setup-capture.sh tun install'
+scp scripts/setup-openwrt.sh scripts/setup-capture.sh scripts/portal-block.sh configs/config.json root@192.168.1.1:/root/
+ssh root@192.168.1.1 'PORTAL_PRIMARY_IP=10.0.0.1 PORTAL_SECONDARY_IP=10.0.0.2 sh /root/setup-openwrt.sh install'
+# 或 TPROXY/TUN 模式：
+ssh root@192.168.1.1 'PORTAL_PRIMARY_IP=10.0.0.1 PORTAL_SECONDARY_IP=10.0.0.2 sh /root/setup-capture.sh tproxy install'
 ```
 
 脚本会：
 1. 安装二进制到 `/usr/bin/hotspot-proxy`
 2. 复制配置到 `/etc/hotspot-proxy/config.json`
 3. 创建 `/etc/init.d/hotspot-proxy` 并 enable
-4. 安装 iptables REDIRECT 规则（LAN 网段自动检测）
+4. 安装 iptables REDIRECT/TPROXY 规则（LAN 网段自动检测）
+5. 在 nat/mangle 的 REDIRECT/TPROXY 前插入 portal IP `RETURN`，并在 `filter FORWARD` 安装 `HOTSPOT_PORTAL` DROP 链；portal IP 通过 `PORTAL_PRIMARY_IP` / `PORTAL_SECONDARY_IP` / `PORTAL_IPS` 或 UCI `hotspot-proxy.portal.*` 指定
 
 验证：
 ```sh
 /etc/init.d/hotspot-proxy status
 curl http://127.0.0.1:18089/status
 iptables -t nat -L HOTSPOT_PROXY -n -v
+iptables -t filter -L HOTSPOT_PORTAL -n -v
 ```
 
 `/status` 会输出 `version`、`revision`、`pid`、`exe`、`generation` 以及当前 `ua_preset`；GUI 用 `generation` 判断 18080 上的进程是否仍是当前配置，不匹配会自动重启该进程。
