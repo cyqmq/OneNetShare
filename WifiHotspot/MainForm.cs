@@ -227,7 +227,12 @@ namespace WifiHotspot
                         var ipv6Result = IPv6Guard.Start(policy);
                         proxyMessage += "\n" + ipv6Result.Message;
                         if (!ipv6Result.Success)
-                            ShowHotspotDiagnosis("IPv6 转发封禁启动失败：\n" + ipv6Result.Message, selected);
+                        {
+                            string hint = ipv6Result.Message.IndexOf("1450") >= 0
+                                ? "\n\n错误码 1450 (ERROR_NO_SYSTEM_RESOURCES): 可能是系统内核资源不足，或 WinDivert 驱动状态异常。建议：重启电脑后重试；确认无其他 WinDivert/Clash/TUN 工具占用同一驱动；必要时以管理员运行 `sc stop WinDivert`、`sc delete WinDivert` 后重启。"
+                                : "";
+                            ShowHotspotDiagnosis("IPv6 转发封禁启动失败：\n" + ipv6Result.Message + hint, selected);
+                        }
                     }
                     else
                     {
