@@ -309,7 +309,7 @@ namespace WifiHotspot
             {
                 string message = NetworkNormalizer.Shared.LastMessage ?? string.Empty;
                 if (message.Contains("未启用")) network = "未运行(未启用)";
-                else if (message.Contains("WinDivert.dll")) network = "未运行(缺 WinDivert.dll)";
+                else if (message.Contains("WinDivert")) network = "未运行(缺 WinDivert 文件)";
                 else if (message.Contains("管理员")) network = "未运行(需管理员)";
                 else if (message.Contains("初始化失败")) network = "未运行(初始化失败)";
                 else network = "未运行";

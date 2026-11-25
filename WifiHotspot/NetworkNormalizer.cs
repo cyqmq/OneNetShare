@@ -64,8 +64,11 @@ namespace WifiHotspot
         public static bool DriverAvailable()
         {
             string dir = AppDomain.CurrentDomain.BaseDirectory;
-            return File.Exists(Path.Combine(dir, "WinDivert.dll")) ||
-                   File.Exists(Path.Combine(Environment.SystemDirectory, "WinDivert.dll"));
+            bool dll = File.Exists(Path.Combine(dir, "WinDivert.dll")) ||
+                       File.Exists(Path.Combine(Environment.SystemDirectory, "WinDivert.dll"));
+            return dll &&
+                   File.Exists(Path.Combine(dir, "WinDivert32.sys")) &&
+                   File.Exists(Path.Combine(dir, "WinDivert64.sys"));
         }
 
         public HotspotResult Start(ProxySettings settings)
@@ -87,7 +90,7 @@ namespace WifiHotspot
             }
             if (!DriverAvailable())
             {
-                _lastMessage = "未找到 WinDivert.dll。请把 WinDivert 2.x 的 WinDivert.dll、WinDivert.sys 与对应架构驱动放到程序目录后重试。";
+                _lastMessage = "未找到 WinDivert 2.x 文件。请把 WinDivert.dll、WinDivert32.sys、WinDivert64.sys 放到程序目录后重试。";
                 return new HotspotResult { Success = false, Message = _lastMessage };
             }
 

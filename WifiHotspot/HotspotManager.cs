@@ -218,8 +218,8 @@ namespace WifiHotspot
             {
                 ProxySettings proxySettings = ProxyConfigManager.Load();
                 if (proxySettings.NetworkEnabled && !NetworkNormalizer.DriverAvailable())
-                    AddIssue(diagnosis, "网络层归一化缺少 WinDivert", "已启用网络层指纹归一化，但程序目录和系统目录都没有 WinDivert.dll。",
-                        "把 WinDivert 2.x 的 WinDivert.dll、WinDivert.sys 与对应架构驱动放到程序目录，并以管理员运行；或在“代理功能”窗口关闭网络层归一化。", string.Empty);
+                    AddIssue(diagnosis, "网络层归一化缺少 WinDivert", "已启用网络层指纹归一化，但程序目录缺少 WinDivert.dll 或 WinDivert32.sys/WinDivert64.sys 驱动。",
+                        "把 WinDivert 2.x 的 WinDivert.dll、WinDivert32.sys、WinDivert64.sys 放到程序目录，并以管理员运行；或在“代理功能”窗口关闭网络层归一化。", string.Empty);
 
                 if (proxySettings.TunEnabled)
                 {
