@@ -13,6 +13,11 @@ namespace WifiHotspot
         public bool Headers { get; set; }
         public bool Udp { get; set; }
         public bool Dns { get; set; }
+        public string DnsUpstreamServers { get; set; }
+        public bool DnsStripEdns { get; set; }
+        public bool DnsForceTcp { get; set; }
+        public int DnsMinTtl { get; set; }
+        public int DnsMaxTtl { get; set; }
         public bool Ntp { get; set; }
         public bool Mdns { get; set; }
         public bool Dhcp { get; set; }
@@ -76,6 +81,11 @@ namespace WifiHotspot
                 Headers = GetBool(deviceforge, "headers", true),
                 Udp = GetBool(udp, "enabled", false),
                 Dns = GetBool(dns, "enabled", false),
+                DnsUpstreamServers = GetDnsServers(dns),
+                DnsStripEdns = GetBool(dns, "strip_edns", true),
+                DnsForceTcp = GetBool(dns, "force_tcp", false),
+                DnsMinTtl = GetInt(dns, "min_ttl", 60),
+                DnsMaxTtl = GetInt(dns, "max_ttl", 86400),
                 Ntp = GetBool(ntp, "enabled", false),
                 Mdns = GetBool(mdns, "enabled", false),
                 Dhcp = GetBool(dhcp, "enabled", false),
@@ -223,7 +233,13 @@ namespace WifiHotspot
             SetBool(deviceforge, "enabled", settings.DeviceForgeEnabled);
             SetBool(deviceforge, "headers", settings.Headers);
             SetBool(GetOrCreateDict(deviceforge, "udp"), "enabled", settings.Udp);
-            SetBool(GetOrCreateDict(deviceforge, "dns"), "enabled", settings.Dns);
+            IDictionary<string, object> dnsSettings = GetOrCreateDict(deviceforge, "dns");
+            SetBool(dnsSettings, "enabled", settings.Dns);
+            dnsSettings["upstream_servers"] = NormalizeDnsServerArray(settings.DnsUpstreamServers);
+            SetBool(dnsSettings, "strip_edns", settings.DnsStripEdns);
+            SetBool(dnsSettings, "force_tcp", settings.DnsForceTcp);
+            SetInt(dnsSettings, "min_ttl", settings.DnsMinTtl <= 0 ? 60 : settings.DnsMinTtl);
+            SetInt(dnsSettings, "max_ttl", settings.DnsMaxTtl <= 0 ? 86400 : settings.DnsMaxTtl);
             SetBool(GetOrCreateDict(deviceforge, "ntp"), "enabled", settings.Ntp);
             SetBool(GetOrCreateDict(deviceforge, "mdns"), "enabled", settings.Mdns);
             SetBool(GetOrCreateDict(deviceforge, "dhcp"), "enabled", settings.Dhcp);
@@ -287,6 +303,55 @@ namespace WifiHotspot
             dict[key] = value;
         }
 
+        private static string GetDnsServers(IDictionary<string, object> dns)
+        {
+            if (dns == null || !dns.ContainsKey("upstream_servers")) return "1.1.1.1";
+            object value = dns["upstream_servers"];
+            if (value is object[])
+            {
+                var parts = new List<string>();
+                foreach (object item in (object[])value)
+                {
+                    string server = Convert.ToString(item);
+                    if (!string.IsNullOrWhiteSpace(server)) parts.Add(server.Trim());
+                }
+                return NormalizeDnsServers(string.Join(",", parts.ToArray()));
+            }
+            if (value is System.Collections.ArrayList)
+            {
+                var parts = new List<string>();
+                foreach (object item in (System.Collections.ArrayList)value)
+                {
+                    string server = Convert.ToString(item);
+                    if (!string.IsNullOrWhiteSpace(server)) parts.Add(server.Trim());
+                }
+                return NormalizeDnsServers(string.Join(",", parts.ToArray()));
+            }
+            return NormalizeDnsServers(Convert.ToString(value));
+        }
+
+        private static string[] NormalizeDnsServerArray(string raw)
+        {
+            var result = new List<string>();
+            foreach (string part in (raw ?? "1.1.1.1").Split(new[] { ',', ';', ' ', '\r', '\n', '\t' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                string server = part.Trim();
+                System.Net.IPAddress ip;
+                if (!System.Net.IPAddress.TryParse(server, out ip) || ip.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork) continue;
+                string normalized = ip.ToString();
+                if (result.Contains(normalized)) continue;
+                result.Add(normalized);
+                if (result.Count == 3) break;
+            }
+            if (result.Count == 0) result.Add("1.1.1.1");
+            return result.ToArray();
+        }
+
+        private static string NormalizeDnsServers(string raw)
+        {
+            return string.Join(",", NormalizeDnsServerArray(raw));
+        }
+
         private static string DefaultJson()
         {
             return @"{
@@ -313,7 +378,7 @@ namespace WifiHotspot
     ""target_os"": ""windows-11"",
     ""headers"": true,
     ""udp"": { ""enabled"": false },
-    ""dns"": { ""enabled"": false },
+    ""dns"": { ""enabled"": false, ""strip_edns"": true, ""force_tcp"": false, ""min_ttl"": 60, ""max_ttl"": 86400, ""upstream_servers"": [""1.1.1.1""] },
     ""ntp"": { ""enabled"": false },
     ""mdns"": { ""enabled"": false },
     ""dhcp"": { ""enabled"": false },

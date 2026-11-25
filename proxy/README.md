@@ -39,7 +39,7 @@ DeviceForge 是终端特征收敛功能名，目标是把 LAN 侧不同终端收
 |--------|------|------|
 | `headers` | `deviceforge.headers` | HTTP Header 套用统一画像，关闭后保留客户端原始 Header |
 | `udp` | `deviceforge.udp.enabled` | UDP 由网关重新创建 socket；全端口需 TUN/TPROXY |
-| `dns` | `deviceforge.dns.enabled` | 去 EDNS、清 AD/CD、TC 重试、TTL 钳制 |
+| `dns` | `deviceforge.dns.enabled` | 去 EDNS、清 AD/CD、TC 重试、TTL 钳制；`upstream_servers` 设置 Wintun 虚拟网卡的上游 DNS |
 | `ntp` | `deviceforge.ntp.enabled` | 固定版本/模式/poll，统一 RefID/Stratum，可改上游 NTP |
 | `mdns` | `deviceforge.mdns.enabled` | 本地伪造统一 hostname/service 的 PTR/SRV/TXT/A 响应 |
 | `dhcp` | `deviceforge.dhcp.enabled` | 重写 Option 55/60/61，统一 Vendor Class/参数列表/Client ID |
@@ -138,7 +138,7 @@ GOOS=windows GOARCH=386 CGO_ENABLED=0 go build -o build/hotspot-proxy-win-x86.ex
      "target_os": "windows-11",
      "headers": true,
      "udp": {"enabled": true, "listen": "0.0.0.0:18500", "all_ports": true, "target_ports": [53, 123, 443, 5353]},
-     "dns": {"enabled": true, "strip_edns": true, "force_tcp": false, "min_ttl": 60, "max_ttl": 86400},
+     "dns": {"enabled": true, "strip_edns": true, "force_tcp": false, "min_ttl": 60, "max_ttl": 86400, "upstream_servers": ["1.1.1.1"]},
      "ntp": {"enabled": true, "server": "pool.ntp.org", "rewrite_refid": true},
      "mdns": {"enabled": true, "hostname": "gateway", "service": "_workstation._tcp.local"},
      "dhcp": {"enabled": true, "vendor_class": "MSFT 5.0", "client_id": ""},
@@ -176,7 +176,7 @@ GOOS=windows GOARCH=386 CGO_ENABLED=0 go build -o build/hotspot-proxy-win-x86.ex
 
 内置画像按“单一画像源”生成：UA、`sec-ch-ua`、`sec-ch-ua-full-version-list`、`sec-ch-ua-mobile` 与平台版本都来自同一浏览器版本/平台；Firefox 与 Safari 不携带 Chromium Client Hints。`ua_preset` 从内置 UA 库选择预设并自动套用完整 Header，不需要手输 UA；`user_agent_override` 仅保留给旧配置兼容。规则的 `profile: "default"` 会跟随 `default_profile`。`ipv6_guard_enabled` 是 Windows GUI 侧的 IPv6 转发封禁总开关，`ipv6_policy` 是封禁策略键：开关启用且检测到公网 IPv6 时，`block` 丢弃全部转发 IPv6，`ula-only` 仅允许 ULA/Link-local，`allow` 显式放弃该保护；`hotspot-proxy` 本身不实现 IPv6 转发封禁。
 
-Windows 下 `tun.enabled=true` 使用 Wintun 全局接管：需把官方 x86 `wintun.dll` 放在 `hotspot-proxy.exe` 同目录并以管理员运行。GUI 会列出真实物理网卡供用户选择出口网卡；`upstream_interface` 留空时自动读取 IPv4 默认路由对应的物理网卡，代理上游 TCP/UDP 会绑定到该网卡，避免流量重新进入 TUN。退出时通过 `GET /shutdown` 或直接信号恢复路由。`tun.ttl` 与 GUI 的“强制 TTL”共用：Windows 画像推荐 128，Android/macOS/iOS/Linux 画像推荐 64，GUI 切换画像时会自动填入并显示防呆提示。`network.mtu_clamp_enabled=true` 时，WinDivert SYN MSS 与 Wintun 合成 SYN-ACK MSS 都会被钳制到 `mss_clamp`；遇到 TLS 握手卡住时可将 1460 降到 1360/1280。经 GUI 启动的代理会把 `[probe]` 事件写入程序目录 `probe.log`，供代理功能窗口滚动显示 Captive/DNS/未知 UDP 事件。
+Windows 下 `tun.enabled=true` 使用 Wintun 全局接管：需把官方 x86 `wintun.dll` 放在 `hotspot-proxy.exe` 同目录并以管理员运行。GUI 会列出真实物理网卡供用户选择出口网卡；`upstream_interface` 留空时自动读取 IPv4 默认路由对应的物理网卡，代理上游 TCP/UDP 会绑定到该网卡，避免流量重新进入 TUN。退出时通过 `GET /shutdown` 或直接信号恢复路由。`tun.ttl` 与 GUI 的“强制 TTL”共用：Windows 画像推荐 128，Android/macOS/iOS/Linux 画像推荐 64，GUI 切换画像时会自动填入并显示防呆提示。`network.mtu_clamp_enabled=true` 时，WinDivert SYN MSS 与 Wintun 合成 SYN-ACK MSS 都会被钳制到 `mss_clamp`；遇到 TLS 握手卡住时可将 1460 降到 1360/1280。`deviceforge.dns.upstream_servers` 可填写最多 3 个 IPv4 DNS（逗号/分号/空格分隔，GUI 上游 DNS 输入框同样支持），Wintun 接管默认路由时会在虚拟网卡设置主/备 DNS，DNS 查询仍经代理统一归一化；退出时恢复 DHCP DNS。经 GUI 启动的代理会把 `[probe]` 事件写入程序目录 `probe.log`，供代理功能窗口滚动显示 Captive/DNS/未知 UDP 事件。
 
 Windows 网络层归一化使用 WinDivert 2.x：Windows 发行包已附带官方 2.2.2 A 版 x86 `WinDivert.dll`、32 位驱动 `WinDivert32.sys` 与 64 位驱动 `WinDivert64.sys`，三者需与 `WifiHotspot.exe` 放在同一目录，并以管理员权限运行。WinDivert 2.x 驱动文件名不是 `WinDivert.sys`；32 位程序在 64 位 Windows 上需要同时保留两个 `.sys` 文件。
 

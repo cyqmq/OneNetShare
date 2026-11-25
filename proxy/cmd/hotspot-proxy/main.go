@@ -86,6 +86,7 @@ func main() {
 		cleanup, err := tun.SetupTUN(tun.Options{
 			Name: cfg.TUN.Name, IP: cfg.TUN.IP, GatewayIP: cfg.TUN.GatewayIP,
 			UpstreamInterface: cfg.TUN.UpstreamInterface, PrefixLen: cfg.TUN.PrefixLen, Route: route,
+			DNSServers: cfg.DeviceForge.DNS.UpstreamServers,
 		}, logger)
 		if err != nil {
 			tunDev.Close()

@@ -39,6 +39,7 @@ type Options struct {
 	UpstreamInterface string
 	PrefixLen         int
 	Route             bool
+	DNSServers        []string
 }
 
 type connection struct {

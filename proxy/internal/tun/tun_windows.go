@@ -325,6 +325,34 @@ func tryNetsh(logger *log.Logger, format string, args ...string) {
 	}
 }
 
+func normalizeDNSServers(servers []string) []string {
+	var result []string
+	seen := make(map[string]bool)
+	for _, server := range servers {
+		server = strings.TrimSpace(server)
+		if server == "" || seen[server] {
+			continue
+		}
+		ip := net.ParseIP(server)
+		if ip == nil || ip.To4() == nil {
+			continue
+		}
+		server = ip.To4().String()
+		if seen[server] {
+			continue
+		}
+		seen[server] = true
+		result = append(result, server)
+		if len(result) == 3 {
+			break
+		}
+	}
+	if len(result) == 0 {
+		result = []string{"1.1.1.1"}
+	}
+	return result
+}
+
 func SetupTUN(opts Options, logger *log.Logger) (func(), error) {
 	if opts.Name == "" {
 		opts.Name = "OneNetShare Tunnel"
@@ -362,7 +390,14 @@ func SetupTUN(opts Options, logger *log.Logger) (func(), error) {
 			netutil.Reset()
 			return func() {}, err
 		}
-		tryNetsh(logger, "设置 Wintun DNS 失败: %v", "interface", "ipv4", "set", "dnsservers", nameArg(opts.Name), "static", "1.1.1.1", "primary")
+		dnsServers := normalizeDNSServers(opts.DNSServers)
+		if err := runNetsh("interface", "ipv4", "set", "dnsservers", nameArg(opts.Name), "static", dnsServers[0], "primary"); err != nil {
+			logger.Printf("设置 Wintun 主 DNS 失败: %v", err)
+		}
+		for i := 1; i < len(dnsServers); i++ {
+			tryNetsh(logger, "设置 Wintun 备用 DNS 失败: %v", "interface", "ipv4", "add", "dnsservers", nameArg(opts.Name), dnsServers[i], fmt.Sprintf("index=%d", i+1))
+		}
+		logger.Printf("Wintun DNS: %s", strings.Join(dnsServers, ", "))
 	}
 
 	cleanup := func() {

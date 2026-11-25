@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -66,11 +67,12 @@ type UDPForgeConfig struct {
 }
 
 type DNSForgeConfig struct {
-	Enabled   bool   `json:"enabled"`
-	StripEDNS bool   `json:"strip_edns"`
-	ForceTCP  bool   `json:"force_tcp"`
-	MinTTL    uint32 `json:"min_ttl"`
-	MaxTTL    uint32 `json:"max_ttl"`
+	Enabled         bool     `json:"enabled"`
+	StripEDNS       bool     `json:"strip_edns"`
+	ForceTCP        bool     `json:"force_tcp"`
+	MinTTL          uint32   `json:"min_ttl"`
+	MaxTTL          uint32   `json:"max_ttl"`
+	UpstreamServers []string `json:"upstream_servers,omitempty"`
 }
 
 type NTPForgeConfig struct {
@@ -249,6 +251,7 @@ func (l *Loader) applyDefaults(cfg *Config) {
 	if cfg.DeviceForge.DNS.MaxTTL == 0 {
 		cfg.DeviceForge.DNS.MaxTTL = 86400
 	}
+	cfg.DeviceForge.DNS.UpstreamServers = normalizeDNSServers(cfg.DeviceForge.DNS.UpstreamServers)
 	if cfg.DeviceForge.NTP.Server == "" {
 		cfg.DeviceForge.NTP.Server = "pool.ntp.org"
 	}
@@ -301,6 +304,29 @@ func (l *Loader) applyDefaults(cfg *Config) {
 		}
 		cfg.Profiles[cfg.DefaultProfile] = p
 	}
+}
+
+func normalizeDNSServers(servers []string) []string {
+	var result []string
+	seen := make(map[string]bool)
+	for _, server := range servers {
+		server = strings.TrimSpace(server)
+		if server == "" || seen[server] {
+			continue
+		}
+		if ip := net.ParseIP(server); ip == nil {
+			continue
+		}
+		result = append(result, server)
+		seen[server] = true
+		if len(result) == 3 {
+			break
+		}
+	}
+	if len(result) == 0 {
+		result = []string{"1.1.1.1"}
+	}
+	return result
 }
 
 func RecommendedTTL(profile string) int {
@@ -370,7 +396,7 @@ func DefaultJSON() string {
       "target_ports": [53, 123, 443, 5353],
       "listen_ports": {"53": 18053, "123": 18123, "443": 18443, "5353": 23353}
     },
-    "dns": {"enabled": true, "strip_edns": true, "force_tcp": false, "min_ttl": 60, "max_ttl": 86400},
+    "dns": {"enabled": true, "strip_edns": true, "force_tcp": false, "min_ttl": 60, "max_ttl": 86400, "upstream_servers": ["1.1.1.1"]},
     "ntp": {"enabled": true, "server": "pool.ntp.org", "rewrite_refid": true},
     "mdns": {"enabled": true, "hostname": "gateway", "service": "_workstation._tcp.local"},
     "dhcp": {"enabled": true, "vendor_class": "MSFT 5.0", "client_id": ""},

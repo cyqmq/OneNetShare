@@ -21,6 +21,11 @@ namespace WifiHotspot
         private readonly CheckBox chkHeaders;
         private readonly CheckBox chkUdp;
         private readonly CheckBox chkDns;
+        private readonly TextBox txtDnsServers;
+        private readonly CheckBox chkDnsStripEdns;
+        private readonly CheckBox chkDnsForceTcp;
+        private readonly NumericUpDown numDnsMinTtl;
+        private readonly NumericUpDown numDnsMaxTtl;
         private readonly CheckBox chkNtp;
         private readonly CheckBox chkMdns;
         private readonly CheckBox chkDhcp;
@@ -88,10 +93,18 @@ namespace WifiHotspot
             chkCaptive = NewCheck("Captive 门户检测处理", settings.Captive, 330, 92);
             chkUdp = NewCheck("UDP 会话重建 (需开启 Wintun)", settings.Udp, 15, 122);
             chkDns = NewCheck("DNS 规范化 (需开启 Wintun)", settings.Dns, 330, 122);
+            var lblDnsServers = new Label { Location = new Point(330, 150), AutoSize = true, Text = "上游DNS:" };
+            txtDnsServers = NewText(settings.DnsUpstreamServers, 395, 147, 225);
+            chkDnsStripEdns = NewCheck("去EDNS", settings.DnsStripEdns, 330, 174);
+            chkDnsForceTcp = NewCheck("强制TCP", settings.DnsForceTcp, 410, 174);
+            var lblDnsMin = new Label { Location = new Point(490, 177), AutoSize = true, Text = "TTL:" };
+            numDnsMinTtl = new NumericUpDown { Location = new Point(522, 174), Size = new Size(45, 23), Minimum = 1, Maximum = 86400, Value = Math.Max(1, Math.Min(86400, settings.DnsMinTtl <= 0 ? 60 : settings.DnsMinTtl)) };
+            var lblDnsMax = new Label { Location = new Point(569, 177), AutoSize = true, Text = "-" };
+            numDnsMaxTtl = new NumericUpDown { Location = new Point(579, 174), Size = new Size(56, 23), Minimum = 1, Maximum = 86400, Value = Math.Max(1, Math.Min(86400, settings.DnsMaxTtl <= 0 ? 86400 : settings.DnsMaxTtl)) };
             chkNtp = NewCheck("NTP 规范化 (需开启 Wintun)", settings.Ntp, 15, 152);
-            chkMdns = NewCheck("mDNS 伪造 (需开启 Wintun)", settings.Mdns, 330, 152);
+            chkMdns = NewCheck("mDNS 伪造 (需开启 Wintun)", settings.Mdns, 330, 202);
             chkDhcp = NewCheck("DHCP 伪造 (需开启 Wintun)", settings.Dhcp, 15, 182);
-            chkAutoStart = NewCheck("随热点自动启动/停止代理", settings.AutoStartProxy, 330, 182);
+            chkAutoStart = NewCheck("随热点自动启动/停止代理", settings.AutoStartProxy, 15, 202);
             chkNetwork = NewCheck("网络层指纹归一化 (WinDivert)", settings.NetworkEnabled, 15, 215);
             var lblTTL = new Label { Location = new Point(300, 218), AutoSize = true, Text = "强制 TTL:" };
             numTTL = new NumericUpDown { Location = new Point(360, 215), Size = new Size(65, 23), Minimum = 1, Maximum = 255, Value = initialTTL };
@@ -162,6 +175,14 @@ namespace WifiHotspot
             implemented.Controls.Add(chkCaptive);
             implemented.Controls.Add(chkUdp);
             implemented.Controls.Add(chkDns);
+            implemented.Controls.Add(lblDnsServers);
+            implemented.Controls.Add(txtDnsServers);
+            implemented.Controls.Add(chkDnsStripEdns);
+            implemented.Controls.Add(chkDnsForceTcp);
+            implemented.Controls.Add(lblDnsMin);
+            implemented.Controls.Add(numDnsMinTtl);
+            implemented.Controls.Add(lblDnsMax);
+            implemented.Controls.Add(numDnsMaxTtl);
             implemented.Controls.Add(chkNtp);
             implemented.Controls.Add(chkMdns);
             implemented.Controls.Add(chkDhcp);
@@ -724,6 +745,11 @@ namespace WifiHotspot
                 Headers = chkHeaders.Checked,
                 Udp = tun || chkUdp.Checked,
                 Dns = chkDns.Checked,
+                DnsUpstreamServers = txtDnsServers.Text.Trim(),
+                DnsStripEdns = chkDnsStripEdns.Checked,
+                DnsForceTcp = chkDnsForceTcp.Checked,
+                DnsMinTtl = (int)numDnsMinTtl.Value,
+                DnsMaxTtl = (int)numDnsMaxTtl.Value,
                 Ntp = chkNtp.Checked,
                 Mdns = chkMdns.Checked,
                 Dhcp = chkDhcp.Checked,

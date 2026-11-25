@@ -21,6 +21,7 @@ func newAdapter(name string, ip string, logger *log.Logger) (packetAdapter, erro
 }
 
 func SetupTUN(opts Options, logger *log.Logger) (func(), error) {
+	_ = opts.DNSServers
 	if err := runCommand("ip", "link", "set", opts.Name, "up"); err != nil {
 		return func() {}, err
 	}

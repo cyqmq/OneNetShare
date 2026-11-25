@@ -12,5 +12,6 @@ func newAdapter(name string, ip string, logger *log.Logger) (packetAdapter, erro
 }
 
 func SetupTUN(opts Options, logger *log.Logger) (func(), error) {
+	_ = opts.DNSServers
 	return func() {}, fmt.Errorf("TUN 模式仅支持 Linux 与 Windows")
 }
