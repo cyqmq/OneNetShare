@@ -15,6 +15,7 @@ import (
 
 	"hotspot-proxy/internal/config"
 	"hotspot-proxy/internal/deviceforge"
+	"hotspot-proxy/internal/headers"
 	"hotspot-proxy/internal/proxy"
 	"hotspot-proxy/internal/tun"
 	"hotspot-proxy/internal/version"
@@ -74,6 +75,7 @@ func main() {
 			logger.Fatalf("TUN 初始化失败: %v", err)
 		}
 		tunDev.SetTTL(cfg.TUN.TTL)
+		tunDev.SetHTTPEngine(headers.NewEngine(loader))
 		if cfg.Network.MtuClamp {
 			tunDev.SetMSS(cfg.Network.MssClamp)
 		}
@@ -97,6 +99,13 @@ func main() {
 			forge.Reload(cfg)
 		}
 
+		proxyServer := proxy.NewServer(loader, logger)
+		go func() {
+			if err := proxyServer.Run(cfg.ListenHTTP); err != nil {
+				logger.Printf("HTTP 代理启动失败: %v", err)
+			}
+		}()
+
 		stopCh := make(chan struct{})
 		var stopOnce sync.Once
 		stop := func() { stopOnce.Do(func() { close(stopCh) }) }
@@ -114,6 +123,7 @@ func main() {
 		for {
 			select {
 			case <-stopCh:
+				proxyServer.Close()
 				cleanup()
 				tunDev.Close()
 				logger.Printf("全局 TUN 模式已退出，路由已恢复")

@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"hotspot-proxy/internal/headers"
 	"hotspot-proxy/internal/netutil"
 )
 
@@ -50,6 +51,8 @@ type connection struct {
 	ack        uint32
 	stateMu    sync.Mutex
 	upstream   net.Conn
+	http       *httpStreamRewriter
+	httpMu     sync.Mutex
 	lastSeen   time.Time
 	closed     bool
 }
@@ -63,6 +66,7 @@ type Device struct {
 	conns          sync.Map
 	recentOutbound sync.Map
 	udpHandler     UDPHandler
+	httpEngine     *headers.Engine
 	ipid           uint16
 	ttl            byte
 	mss            int
@@ -95,6 +99,8 @@ func (d *Device) Name() string { return d.iface.Name() }
 func (d *Device) LocalIP() net.IP { return d.tunIP }
 
 func (d *Device) SetUDPHandler(h UDPHandler) { d.udpHandler = h }
+
+func (d *Device) SetHTTPEngine(engine *headers.Engine) { d.httpEngine = engine }
 
 func (d *Device) SetTTL(ttl int) {
 	if ttl < 1 || ttl > 255 {
@@ -346,7 +352,19 @@ func (d *Device) handlePacket(pkt []byte) {
 		if c.upstream == nil {
 			return
 		}
-		if _, err := c.upstream.Write(payload); err != nil {
+		data := payload
+		if dstPort == 80 && d.httpEngine != nil {
+			c.httpMu.Lock()
+			if c.http == nil {
+				c.http = &httpStreamRewriter{engine: d.httpEngine}
+			}
+			rewritten, err := c.http.Rewrite(payload)
+			c.httpMu.Unlock()
+			if err == nil && len(rewritten) > 0 {
+				data = rewritten
+			}
+		}
+		if _, err := c.upstream.Write(data); err != nil {
 			d.logger.Printf("[tun] upstream write: %v", err)
 			d.closeConnection(c, key)
 			return

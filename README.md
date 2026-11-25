@@ -31,7 +31,7 @@
 - 探针日志面板实时滚动显示 Captive 拦截、DNS 规范化、未知 UDP 丢弃事件；一键连通性测试通过本地回显探针验证 HTTP Header 改写，并检查 TUN 默认路由状态
 - 代理自动诊断：启动失败时自动检查 `config.json`、端口格式/占用/Windows 保留端口范围、退出码、进程输出与 `probe.log`，给出端口/权限/文件/TUN 出口网卡等具体原因；代理功能窗口提供“自动诊断”按钮
 - 网络层指纹归一化：基于 WinDivert 在 Windows 网卡出口强制重写 TTL/IPID、IPv6 Flow Label 与 TCP SYN 选项；已随包附带官方 WinDivert 2.2.2 x86 `WinDivert.dll`、`WinDivert32.sys`、`WinDivert64.sys`，需管理员权限
-- Wintun 全局 TUN 接管：创建 `OneNetShare Tunnel` 虚拟网卡，接管 IPv4 默认路由/DNS，在用户态重建 UDP/DNS/NTP 会话并统一出口包指纹；需要官方 x86 `wintun.dll` 和管理员权限
+- Wintun 全局 TUN 接管：创建 `OneNetShare Tunnel` 虚拟网卡，接管 IPv4 默认路由/DNS，在用户态重建 UDP/DNS/NTP 会话并统一出口包指纹，TCP 80 流同样应用 HTTP Header 画像；需要官方 x86 `wintun.dll` 和管理员权限
 - 自动配置 ICS（Internet Connection Sharing）网络共享
 - 可自定义 SSID、密码（8-63 位 WPA2）
 - 选择用于共享上网的物理网卡
