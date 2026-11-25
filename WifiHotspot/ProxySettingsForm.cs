@@ -21,6 +21,8 @@ namespace WifiHotspot
         private readonly CheckBox chkHeaders;
         private readonly CheckBox chkUdp;
         private readonly CheckBox chkDns;
+        private readonly CheckBox chkDnsEmbedded;
+        private readonly Button btnDetectDns;
         private readonly TextBox txtDnsServers;
         private readonly CheckBox chkDnsStripEdns;
         private readonly CheckBox chkDnsForceTcp;
@@ -58,6 +60,7 @@ namespace WifiHotspot
         private readonly CheckBox chkMonitorTtl;
         private readonly CheckBox chkMonitorUa;
         private readonly CheckBox chkMonitorTls;
+        private readonly CheckBox chkMonitorDns;
         private readonly Label lblMonitorStatus;
         private readonly TextBox txtProbeLog;
         private readonly System.Windows.Forms.Timer probeTimer;
@@ -78,12 +81,12 @@ namespace WifiHotspot
             ClientSize = new Size(680, 760);
             Font = new Font("Microsoft YaHei", 9F, FontStyle.Regular, GraphicsUnit.Point, 134);
 
-            var content = new Panel { Dock = DockStyle.Fill, AutoScroll = true, AutoScrollMinSize = new Size(0, 1080) };
-            var implemented = new GroupBox { Text = "已实现功能", Location = new Point(12, 12), Size = new Size(640, 520) };
-            var monitorGroup = new GroupBox { Text = "核心监控（只读，不改包）", Location = new Point(12, 540), Size = new Size(640, 100) };
-            var missing = new GroupBox { Text = "未实现功能", Location = new Point(12, 650), Size = new Size(640, 100) };
-            var note = new Label { Location = new Point(15, 487), Size = new Size(600, 30), ForeColor = Color.Gray };
-            note.Text = "Wintun 全局 TUN 接管开启后，UDP/DNS/NTP 经虚拟网卡进入代理；HTTP Header 仍需代理转发。TUN 与 WinDivert 网络层归一化互斥。TTL 会随设备指纹自动填入推荐值。";
+            var content = new Panel { Dock = DockStyle.Fill, AutoScroll = true, AutoScrollMinSize = new Size(0, 1120) };
+            var implemented = new GroupBox { Text = "已实现功能", Location = new Point(12, 12), Size = new Size(640, 545) };
+            var monitorGroup = new GroupBox { Text = "核心监控（只读，不改包）", Location = new Point(12, 560), Size = new Size(640, 125) };
+            var missing = new GroupBox { Text = "未实现功能", Location = new Point(12, 695), Size = new Size(640, 100) };
+            var note = new Label { Location = new Point(15, 505), Size = new Size(600, 30), ForeColor = Color.Gray };
+            note.Text = "内嵌 DNS 在全局 TUN / Linux redirect 的 UDP:53 拦截路径生效，先查本地缓存，未命中时经出口网卡 DNS 上游查询；ICS 原生模式下 53 由 Windows ICS 占用。WinDivert 只读监控 UDP:53 验证“手机是否发出”和“电脑是否转发”。TUN 与 WinDivert 网络层归一化互斥。";
 
             var lblMode = new Label { Location = new Point(15, 28), AutoSize = true, Text = "运行模式: forward (Windows)" };
             var lblProfile = new Label { Location = new Point(160, 28), AutoSize = true, Text = "默认设备指纹:" };
@@ -162,21 +165,27 @@ namespace WifiHotspot
             txtPortalPrimary = NewText(settings.PortalPrimaryIP, 340, 450, 110);
             var lblPortalSecondary = new Label { Location = new Point(460, 453), AutoSize = true, Text = "备IP:" };
             txtPortalSecondary = NewText(settings.PortalSecondaryIP, 500, 450, 120);
+            chkDnsEmbedded = NewCheck("内嵌 DNS 服务+缓存（手机查询→缓存→物理网卡 DNS）", settings.DnsEmbedded, 15, 478);
+            btnDetectDns = NewButton("读取出口 DNS", 130);
+            btnDetectDns.Location = new Point(340, 475);
+            btnDetectDns.Click += DetectDnsServers;
 
             chkMonitorEnabled = NewCheck("核心监控总开关", settings.MonitorEnabled, 15, 24);
             chkMonitorTtl = NewCheck("TTL 跳数变化 (WinDivert sniff)", settings.MonitorTtl, 155, 24);
             chkMonitorUa = NewCheck("HTTP UA 记录/分析", settings.MonitorUa, 370, 24);
             chkMonitorTls = NewCheck("TLS SNI/JA3 记录", settings.MonitorTls, 510, 24);
+            chkMonitorDns = NewCheck("UDP:53 到达/转发验证", settings.MonitorDns, 15, 58);
             var btnToggleMonitor = NewButton("启动/停止监控", 108);
-            btnToggleMonitor.Location = new Point(510, 55);
+            btnToggleMonitor.Location = new Point(510, 58);
             btnToggleMonitor.Click += ToggleMonitor;
-            lblMonitorStatus = new Label { Location = new Point(15, 58), Size = new Size(475, 30), ForeColor = Color.DarkBlue };
+            lblMonitorStatus = new Label { Location = new Point(155, 58), Size = new Size(340, 52), ForeColor = Color.DarkBlue };
             Action updateMonitorControls = delegate
             {
                 bool enabled = chkMonitorEnabled.Checked;
                 chkMonitorTtl.Enabled = enabled;
                 chkMonitorUa.Enabled = enabled;
                 chkMonitorTls.Enabled = enabled;
+                chkMonitorDns.Enabled = enabled;
                 btnToggleMonitor.Enabled = enabled;
             };
             chkMonitorEnabled.CheckedChanged += delegate { updateMonitorControls(); };
@@ -247,6 +256,8 @@ namespace WifiHotspot
             implemented.Controls.Add(txtPortalPrimary);
             implemented.Controls.Add(lblPortalSecondary);
             implemented.Controls.Add(txtPortalSecondary);
+            implemented.Controls.Add(chkDnsEmbedded);
+            implemented.Controls.Add(btnDetectDns);
             implemented.Controls.Add(note);
 
             var chkWebRtc = NewCheck("WebRTC 本地 IP 防泄漏（未实现）", false, 15, 18);
@@ -266,10 +277,11 @@ namespace WifiHotspot
             monitorGroup.Controls.Add(chkMonitorTtl);
             monitorGroup.Controls.Add(chkMonitorUa);
             monitorGroup.Controls.Add(chkMonitorTls);
+            monitorGroup.Controls.Add(chkMonitorDns);
             monitorGroup.Controls.Add(lblMonitorStatus);
             monitorGroup.Controls.Add(btnToggleMonitor);
 
-            var grpProbe = new GroupBox { Text = "探针日志 / 连通性测试", Location = new Point(12, 760), Size = new Size(640, 250) };
+            var grpProbe = new GroupBox { Text = "探针日志 / 连通性测试", Location = new Point(12, 805), Size = new Size(640, 250) };
             txtProbeLog = new TextBox { Multiline = true, ReadOnly = true, Dock = DockStyle.Fill, ScrollBars = ScrollBars.Vertical, BackColor = Color.White, Font = new Font("Consolas", 9F) };
             var probePanel = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 44, FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(6, 6, 6, 6) };
             var btnTest = NewButton("一键连通性测试", 150);
@@ -284,14 +296,15 @@ namespace WifiHotspot
             grpProbe.Controls.Add(txtProbeLog);
             grpProbe.Controls.Add(probePanel);
 
-            lblResult = new Label { Location = new Point(12, 1020), Size = new Size(640, 30), ForeColor = Color.DarkGreen };
+            lblResult = new Label { Location = new Point(12, 1065), Size = new Size(640, 30), ForeColor = Color.DarkGreen };
             lblResult.Text = (ProxyProcessManager.IsRunning() ? "代理运行" : "代理未运行") +
                              "；Wintun.dll " + (HotspotManager.WintunAvailable() ? "存在" : "缺失") +
                              "；网络层归一化 " + (NetworkNormalizer.Shared.IsRunning ? "运行" : "未运行（" + NetworkNormalizer.Shared.LastMessage + "）") +
                              "；IPv6 封禁 " + (!settings.IPv6GuardEnabled ? "已关闭" : (IPv6Guard.IsRunning ? "运行" : "未运行")) +
                              "；Portal " + (PortalGuard.IsRunning ? "运行" : "未运行") +
-                             "；TTL 监控 " + TrafficMonitor.Shared.StatusText;
-            lblMonitorStatus.Text = "代理侧 HTTP UA / TLS SNI+JA3 随代理进程启用；TTL 监控 " + TrafficMonitor.Shared.StatusText;
+                              "；TTL 监控 " + TrafficMonitor.Shared.StatusText +
+                              "；DNS 监控 " + DnsMonitor.Shared.StatusText;
+            lblMonitorStatus.Text = MonitorStatusText();
 
             var panel = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 48, FlowDirection = FlowDirection.RightToLeft, WrapContents = false, Padding = new Padding(8, 8, 8, 8) };
             var btnClose = NewButton("关闭");
@@ -355,6 +368,54 @@ namespace WifiHotspot
                 cmbTunUpstream.Items.Add("未检测到可用网卡");
             string target = string.IsNullOrEmpty(selected) ? cmbTunUpstream.Items[0].ToString() : selected;
             cmbTunUpstream.SelectedItem = target;
+        }
+
+        private void DetectDnsServers(object sender, EventArgs e)
+        {
+            string selected = cmbTunUpstream.SelectedItem == null ? string.Empty : cmbTunUpstream.SelectedItem.ToString();
+            var servers = new List<string>();
+            foreach (NetworkInterface nic in NetworkInterface.GetAllNetworkInterfaces())
+            {
+                bool match = !string.IsNullOrEmpty(selected) &&
+                             selected != "未检测到可用网卡" &&
+                             string.Equals(nic.Name, selected, StringComparison.OrdinalIgnoreCase);
+                if (!match) continue;
+                foreach (IPAddress address in nic.GetIPProperties().DnsAddresses)
+                {
+                    if (address.AddressFamily != AddressFamily.InterNetwork) continue;
+                    string text = address.ToString();
+                    if (!servers.Contains(text)) servers.Add(text);
+                    if (servers.Count == 3) break;
+                }
+                break;
+            }
+            if (servers.Count == 0)
+            {
+                foreach (NetworkInterface nic in NetworkInterface.GetAllNetworkInterfaces())
+                {
+                    if (nic.OperationalStatus != OperationalStatus.Up) continue;
+                    var properties = nic.GetIPProperties();
+                    if (properties.GatewayAddresses.Count == 0 || properties.DnsAddresses.Count == 0) continue;
+                    string text = (nic.Name + " " + nic.Description).ToLowerInvariant();
+                    if (text.Contains("virtual") || text.Contains("vmware") || text.Contains("hyper-v") ||
+                        text.Contains("wsl") || text.Contains("docker") || text.Contains("onenetshare")) continue;
+                    foreach (IPAddress address in properties.DnsAddresses)
+                    {
+                        if (address.AddressFamily != AddressFamily.InterNetwork) continue;
+                        string value = address.ToString();
+                        if (!servers.Contains(value)) servers.Add(value);
+                        if (servers.Count == 3) break;
+                    }
+                    if (servers.Count > 0) break;
+                }
+            }
+            if (servers.Count == 0)
+            {
+                lblResult.Text = "未从出口网卡读取到 IPv4 DNS，请手动填写上游 DNS";
+                return;
+            }
+            txtDnsServers.Text = string.Join(",", servers.ToArray());
+            lblResult.Text = "已从出口网卡读取上游 DNS: " + txtDnsServers.Text;
         }
 
         private static bool IsUsableUpstream(IcsManager.NetworkAdapterInfo adapter)
@@ -780,6 +841,7 @@ namespace WifiHotspot
                 Headers = chkHeaders.Checked,
                 Udp = tun || chkUdp.Checked,
                 Dns = chkDns.Checked,
+                DnsEmbedded = chkDnsEmbedded.Checked,
                 DnsUpstreamServers = txtDnsServers.Text.Trim(),
                 DnsStripEdns = chkDnsStripEdns.Checked,
                 DnsForceTcp = chkDnsForceTcp.Checked,
@@ -816,7 +878,8 @@ namespace WifiHotspot
                 MonitorEnabled = chkMonitorEnabled.Checked,
                 MonitorTtl = chkMonitorTtl.Checked,
                 MonitorUa = chkMonitorUa.Checked,
-                MonitorTls = chkMonitorTls.Checked
+                MonitorTls = chkMonitorTls.Checked,
+                MonitorDns = chkMonitorDns.Checked
             };
         }
 
@@ -834,7 +897,7 @@ namespace WifiHotspot
             ProxySettings settings = Collect();
             ProxyConfigManager.Save(settings, _configPath);
             lblResult.Text = "配置已保存。" + ApplyNetwork(settings) + "；" + ApplyIPv6Guard(settings) + "；" + ApplyMonitor(settings) + TuneWarning(settings);
-            lblMonitorStatus.Text = "代理侧 HTTP UA / TLS SNI+JA3 随代理进程启用；TTL 监控 " + TrafficMonitor.Shared.StatusText;
+            lblMonitorStatus.Text = MonitorStatusText();
         }
 
         private void SaveAndRestart(object sender, EventArgs e)
@@ -843,7 +906,7 @@ namespace WifiHotspot
             ProxyConfigManager.Save(settings, _configPath);
             string result = ProxyProcessManager.IsRunning() ? ProxyProcessManager.Stop() + "；" + ProxyProcessManager.Start(_configPath) : ProxyProcessManager.Start(_configPath);
             lblResult.Text = result + "；" + ApplyNetwork(settings) + "；" + ApplyIPv6Guard(settings) + "；" + ApplyMonitor(settings) + TuneWarning(settings);
-            lblMonitorStatus.Text = "代理侧 HTTP UA / TLS SNI+JA3 随代理进程启用；TTL 监控 " + TrafficMonitor.Shared.StatusText;
+            lblMonitorStatus.Text = MonitorStatusText();
             ShowProxyDiagnosticIfNeeded();
         }
 
@@ -888,8 +951,10 @@ namespace WifiHotspot
 
         private void ToggleMonitor(object sender, EventArgs e)
         {
-            lblResult.Text = TrafficMonitor.Shared.IsRunning ? TrafficMonitor.Shared.Stop().Message : ApplyMonitor(Collect());
-            lblMonitorStatus.Text = "代理侧 HTTP UA / TLS SNI+JA3 随代理进程启用；TTL 监控 " + TrafficMonitor.Shared.StatusText;
+            lblResult.Text = TrafficMonitor.Shared.IsRunning || DnsMonitor.Shared.IsRunning
+                ? TrafficMonitor.Shared.Stop().Message + "；" + DnsMonitor.Shared.Stop().Message
+                : ApplyMonitor(Collect());
+            lblMonitorStatus.Text = MonitorStatusText();
         }
 
         private static string ApplyNetwork(ProxySettings settings)
@@ -906,8 +971,19 @@ namespace WifiHotspot
 
         private static string ApplyMonitor(ProxySettings settings)
         {
-            if (!settings.MonitorEnabled || !settings.MonitorTtl) return TrafficMonitor.Shared.Stop().Message;
-            return TrafficMonitor.Shared.Start(settings).Message;
+            string ttl = !settings.MonitorEnabled || !settings.MonitorTtl
+                ? TrafficMonitor.Shared.Stop().Message
+                : TrafficMonitor.Shared.Start(settings).Message;
+            string dns = !settings.MonitorEnabled || !settings.MonitorDns
+                ? DnsMonitor.Shared.Stop().Message
+                : DnsMonitor.Shared.Start(settings).Message;
+            return ttl + "；" + dns;
+        }
+
+        private static string MonitorStatusText()
+        {
+            return "代理侧 HTTP UA / TLS SNI+JA3 随代理进程启用；" + TrafficMonitor.Shared.StatusText +
+                   "；" + DnsMonitor.Shared.StatusText;
         }
 
         private void OpenConfig(object sender, EventArgs e)

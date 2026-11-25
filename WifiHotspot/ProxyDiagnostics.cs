@@ -180,6 +180,8 @@ namespace WifiHotspot
             bool ttl = true;
             bool ua = true;
             bool tls = true;
+            bool dns = true;
+            bool dnsEmbedded = true;
             if (File.Exists(path))
             {
                 try
@@ -193,6 +195,10 @@ namespace WifiHotspot
                         ttl = GetBool(monitor, "ttl", true);
                         ua = GetBool(monitor, "ua", true);
                         tls = GetBool(monitor, "tls", true);
+                        dns = GetBool(monitor, "dns", true);
+                        IDictionary<string, object> deviceforge = GetDict(root, "deviceforge");
+                        IDictionary<string, object> dnsConfig = GetDict(deviceforge, "dns");
+                        dnsEmbedded = GetBool(dnsConfig, "embedded", true);
                     }
                 }
                 catch { }
@@ -202,11 +208,18 @@ namespace WifiHotspot
                       "；TTL=" + (ttl ? "启用" : "关闭") +
                       "；UA=" + (ua ? "启用" : "关闭") +
                       "；TLS=" + (tls ? "启用" : "关闭") +
-                      "；TTL运行状态=" + TrafficMonitor.Shared.StatusText);
+                      "；DNS监控=" + (dns ? "启用" : "关闭") +
+                      "；内嵌DNS=" + (dnsEmbedded ? "启用" : "关闭") +
+                      "；TTL运行状态=" + TrafficMonitor.Shared.StatusText +
+                      "；DNS运行状态=" + DnsMonitor.Shared.StatusText);
             if (enabled && ttl && !TrafficMonitor.Shared.IsRunning)
                 lines.Add("[警告] 配置要求 TTL 跳数监控，但当前未运行；启动热点后才会启用，或在代理设置里手动启动。");
+            if (enabled && dns && !DnsMonitor.Shared.IsRunning)
+                lines.Add("[警告] 配置要求 UDP:53 到达/转发监控，但当前未运行；无法区分手机未发出查询、电脑未收到、代理未转发。");
             if (enabled && ttl && !NetworkNormalizer.DriverAvailable())
-                lines.Add("[错误] 已启用 TTL 跳数监控，但 WinDivert.dll / WinDivert32.sys / WinDivert64.sys 不完整。");
+                lines.Add("[错误] 已启用 TTL/DNS 跳数与端口监控，但 WinDivert.dll / WinDivert32.sys / WinDivert64.sys 不完整。");
+            if (!dnsEmbedded)
+                lines.Add("[提示] 内嵌 DNS 服务已关闭；手机 DNS 查询将继续按原目标透明转发，没有本地缓存与上游 DNS 改写。");
             if (enabled && !ua && !tls)
                 lines.Add("[提示] HTTP UA 与 TLS SNI/JA3 监控均已关闭；将无法从代理日志定位应用层指纹断网。");
 
@@ -223,7 +236,10 @@ namespace WifiHotspot
                         while ((line = reader.ReadLine()) != null)
                         {
                             if (line.IndexOf("[监控]", StringComparison.Ordinal) < 0 &&
-                                line.IndexOf("TTL证据", StringComparison.Ordinal) < 0) continue;
+                                line.IndexOf("TTL证据", StringComparison.Ordinal) < 0 &&
+                                line.IndexOf("DNS证据", StringComparison.Ordinal) < 0 &&
+                                line.IndexOf("DNS监控", StringComparison.Ordinal) < 0 &&
+                                line.IndexOf("DNS代理", StringComparison.Ordinal) < 0) continue;
                             evidence.Add(line);
                             if (evidence.Count > 400) evidence.RemoveAt(0);
                         }
@@ -238,6 +254,17 @@ namespace WifiHotspot
                 lines.Add("[判定] probe.log 已捕获同流入站/出站 TTL 相差 1：Windows 原生路由递减且未被纠正；应开启网络层归一化或全局 TUN 接管。");
             if (joined.IndexOf("判定=疑似网关按应用层UA/指纹匹配断网", StringComparison.Ordinal) >= 0)
                 lines.Add("[判定] probe.log 已出现手机 UA 与电脑流量混杂后断开的证据：疑似认证网关按应用层指纹匹配断网。");
+            if (joined.IndexOf("判定=电脑端已收到并已转发", StringComparison.Ordinal) >= 0)
+                lines.Add("[判定] probe.log 已捕获手机 DNS 查询到达电脑并从出口网卡转发出去：电脑端接收与 DNS 代理转发均正常。");
+            if (joined.IndexOf("判定=DNS Proxy 未运行或拦截未生效", StringComparison.Ordinal) >= 0)
+                lines.Add("[判定] probe.log 显示手机 DNS 查询已到达电脑但未见上行查询或回包：DNS Proxy 未运行或 DNS 拦截/缓存路径未生效。");
+            if (joined.IndexOf("判定=DNS 已回到手机", StringComparison.Ordinal) >= 0)
+                lines.Add("[判定] probe.log 显示 DNS 响应已返回手机：DNS 回包链路正常。");
+            if (joined.IndexOf("手机查询已收到但上游查询失败", StringComparison.Ordinal) >= 0)
+                lines.Add("[判定] probe.log 显示电脑收到 DNS 查询但上游 DNS 查询失败：检查出口网卡、上游 DNS 地址与物理网卡 DNS 配置。");
+            if (joined.IndexOf("DNS 端口监控已启动", StringComparison.Ordinal) >= 0 &&
+                joined.IndexOf("[DNS监控] 手机查询", StringComparison.Ordinal) < 0)
+                lines.Add("[提示] DNS 端口监控正在运行但未捕获手机查询：优先检查热点防火墙/客户端隔离、手机 DHCP 的 DNS 是否指向电脑、手机是否确实发起 UDP:53 查询。");
         }
 
         public static string CheckIPv6Safety()
@@ -432,7 +459,7 @@ namespace WifiHotspot
         private static bool IsInterestingLog(string line)
         {
             if (string.IsNullOrWhiteSpace(line)) return false;
-            string[] keys = { "失败", "错误", "panic", "error", "listen", "bind", "permission", "denied", "invalid", "config", "json", "wintun", "windivert", "TUN", "address already in use", "操作不允许", "没有找到", "监控", "TTL证据", "监控证据" };
+            string[] keys = { "失败", "错误", "panic", "error", "listen", "bind", "permission", "denied", "invalid", "config", "json", "wintun", "windivert", "TUN", "address already in use", "操作不允许", "没有找到", "监控", "TTL证据", "监控证据", "DNS证据", "DNS监控", "DNS代理", "手机查询" };
             foreach (string key in keys)
                 if (line.IndexOf(key, StringComparison.OrdinalIgnoreCase) >= 0) return true;
             return false;

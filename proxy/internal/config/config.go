@@ -88,12 +88,16 @@ type UDPForgeConfig struct {
 
 type DNSForgeConfig struct {
 	Enabled         bool     `json:"enabled"`
+	Embedded        *bool    `json:"embedded,omitempty"`
+	CacheSize       int      `json:"cache_size,omitempty"`
 	StripEDNS       bool     `json:"strip_edns"`
 	ForceTCP        bool     `json:"force_tcp"`
 	MinTTL          uint32   `json:"min_ttl"`
 	MaxTTL          uint32   `json:"max_ttl"`
 	UpstreamServers []string `json:"upstream_servers,omitempty"`
 }
+
+func (c DNSForgeConfig) IsEmbedded() bool { return c.Enabled && boolOr(c.Embedded, true) }
 
 type NTPForgeConfig struct {
 	Enabled      bool   `json:"enabled"`
@@ -271,6 +275,9 @@ func (l *Loader) applyDefaults(cfg *Config) {
 	if cfg.DeviceForge.DNS.MaxTTL == 0 {
 		cfg.DeviceForge.DNS.MaxTTL = 86400
 	}
+	if cfg.DeviceForge.DNS.CacheSize <= 0 {
+		cfg.DeviceForge.DNS.CacheSize = 4096
+	}
 	cfg.DeviceForge.DNS.UpstreamServers = normalizeDNSServers(cfg.DeviceForge.DNS.UpstreamServers)
 	if cfg.DeviceForge.NTP.Server == "" {
 		cfg.DeviceForge.NTP.Server = "pool.ntp.org"
@@ -417,7 +424,7 @@ func DefaultJSON() string {
       "target_ports": [53, 123, 443, 5353],
       "listen_ports": {"53": 18053, "123": 18123, "443": 18443, "5353": 23353}
     },
-    "dns": {"enabled": true, "strip_edns": true, "force_tcp": false, "min_ttl": 60, "max_ttl": 86400, "upstream_servers": ["1.1.1.1"]},
+    "dns": {"enabled": true, "embedded": true, "cache_size": 4096, "strip_edns": true, "force_tcp": false, "min_ttl": 60, "max_ttl": 86400, "upstream_servers": ["1.1.1.1"]},
     "ntp": {"enabled": true, "server": "pool.ntp.org", "rewrite_refid": true},
     "mdns": {"enabled": true, "hostname": "gateway", "service": "_workstation._tcp.local"},
     "dhcp": {"enabled": true, "vendor_class": "MSFT 5.0", "client_id": ""},

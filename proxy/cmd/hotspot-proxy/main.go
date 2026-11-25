@@ -113,7 +113,7 @@ func main() {
 		stopCh := make(chan struct{})
 		var stopOnce sync.Once
 		stop := func() { stopOnce.Do(func() { close(stopCh) }) }
-		go startStatusServer(loader, logger, stop, tracker)
+		go startStatusServer(loader, logger, stop, tracker, forge)
 		go func() {
 			if err := tunDev.Run(); err != nil {
 				logger.Printf("TUN 运行错误: %v", err)
@@ -173,7 +173,7 @@ func main() {
 	stopCh := make(chan struct{})
 	var stopOnce sync.Once
 	stop := func() { stopOnce.Do(func() { close(stopCh) }) }
-	go startStatusServer(loader, logger, stop, tracker)
+	go startStatusServer(loader, logger, stop, tracker, forge)
 
 	logger.Printf("%s 启动完成 (http=%s https=%s mode=%s)",
 		version.String(), cfg.ListenHTTP, cfg.ListenHTTPS, cfg.Mode)
@@ -212,7 +212,7 @@ func startReloadWatcher(loader *config.Loader, logger *log.Logger) {
 	}
 }
 
-func startStatusServer(loader *config.Loader, logger *log.Logger, stop func(), tracker *monitor.Tracker) {
+func startStatusServer(loader *config.Loader, logger *log.Logger, stop func(), tracker *monitor.Tracker, forge *deviceforge.Manager) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/status", func(w http.ResponseWriter, r *http.Request) {
 		cfg := loader.Get()
@@ -230,6 +230,10 @@ func startStatusServer(loader *config.Loader, logger *log.Logger, stop func(), t
 		fmt.Fprintf(w, "monitor=%v/%v/%v/%v ua_phone=%d ua_desktop=%d tls=%d alerts=%d\n",
 			cfg.Monitor.IsEnabled(), cfg.Monitor.IsTTL(), cfg.Monitor.IsUA(), cfg.Monitor.IsTLS(),
 			stats.Phone, stats.Desktop, stats.TLS, stats.Alerts)
+		dnsStats := forge.DNSStats()
+		fmt.Fprintf(w, "dns_embedded=%v dns_cache=%d dns_queries=%d dns_hits=%d dns_misses=%d dns_upstream_ok=%d dns_upstream_err=%d\n",
+			cfg.DeviceForge.DNS.IsEmbedded(), cfg.DeviceForge.DNS.CacheSize,
+			dnsStats.Queries, dnsStats.Hits, dnsStats.Misses, dnsStats.UpstreamOK, dnsStats.UpstreamErr)
 	})
 	mux.HandleFunc("/reload", func(w http.ResponseWriter, r *http.Request) {
 		if err := loader.Reload(); err != nil {

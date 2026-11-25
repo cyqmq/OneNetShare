@@ -22,6 +22,7 @@ type Manager struct {
 	loader   *config.Loader
 	logger   *log.Logger
 	sessions sync.Map
+	dns      *dnsResolver
 }
 
 type udpSession struct {
@@ -36,14 +37,24 @@ type udpSession struct {
 }
 
 func NewManager(loader *config.Loader, logger *log.Logger) *Manager {
-	m := &Manager{loader: loader, logger: logger}
+	m := &Manager{loader: loader, logger: logger, dns: newDNSResolver(logger, loader.Get().DeviceForge.DNS.CacheSize)}
 	go m.cleanup()
 	return m
+}
+
+func (m *Manager) DNSStats() DNSStats {
+	if m.dns == nil {
+		return DNSStats{}
+	}
+	return m.dns.Stats()
 }
 
 func (m *Manager) StartUDP(mode string) error { return startUDPListeners(m, mode) }
 
 func (m *Manager) Reload(c *config.Config) {
+	if m.dns != nil {
+		m.dns.setLimit(c.DeviceForge.DNS.CacheSize)
+	}
 	m.logger.Printf("DeviceForge: enabled=%v target=%s udp=%v dns=%v ntp=%v mdns=%v dhcp=%v captive=%v/%s headers=%v",
 		c.DeviceForge.Enabled, c.DeviceForge.TargetOS, c.DeviceForge.UDP.Enabled,
 		c.DeviceForge.DNS.Enabled, c.DeviceForge.NTP.Enabled, c.DeviceForge.MDNS.Enabled,
@@ -100,6 +111,26 @@ func (m *Manager) HandleUDP(srcIP net.IP, srcPort uint16, dstIP net.IP, dstPort 
 
 	if cfg.DNS.Enabled && dstPort == 53 {
 		name := DNSQueryName(payload)
+		m.logger.Printf("[probe][DNS监控] 手机查询 client=%s dst=%s:%d name=%s", srcIP, dstIP, dstPort, name)
+		if cfg.DNS.IsEmbedded() && m.dns != nil {
+			queryCfg := cfg.DNS
+			queryCfg.ForceTCP = false
+			q, _ := NormalizeDNSQuery(payload, queryCfg)
+			resp, hit, err := m.dns.resolve(q, cfg.DNS)
+			if err != nil {
+				m.logger.Printf("[probe][DNS证据] 手机查询 %s 已收到但上游查询失败: %v；判定=DNS 代理未转发成功", name, err)
+				return
+			}
+			source := "上游"
+			if hit {
+				source = "缓存"
+			}
+			m.logger.Printf("[probe][DNS代理] name=%s client=%s source=%s", name, srcIP, source)
+			if err := sender.SendUDP(dstIP, dstPort, srcIP, srcPort, resp); err != nil {
+				m.logger.Printf("[deviceforge] embedded dns reply: %v", err)
+			}
+			return
+		}
 		q, forward := NormalizeDNSQuery(payload, cfg.DNS)
 		if !forward {
 			m.logger.Printf("[probe] DNS 查询 %s -> 强制 TCP 重试", name)

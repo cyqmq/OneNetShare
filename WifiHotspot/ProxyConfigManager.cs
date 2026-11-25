@@ -13,6 +13,7 @@ namespace WifiHotspot
         public bool Headers { get; set; }
         public bool Udp { get; set; }
         public bool Dns { get; set; }
+        public bool DnsEmbedded { get; set; }
         public string DnsUpstreamServers { get; set; }
         public bool DnsStripEdns { get; set; }
         public bool DnsForceTcp { get; set; }
@@ -50,6 +51,7 @@ namespace WifiHotspot
         public bool MonitorTtl { get; set; }
         public bool MonitorUa { get; set; }
         public bool MonitorTls { get; set; }
+        public bool MonitorDns { get; set; }
     }
 
     public static class ProxyConfigManager
@@ -86,6 +88,7 @@ namespace WifiHotspot
                 Headers = GetBool(deviceforge, "headers", true),
                 Udp = GetBool(udp, "enabled", false),
                 Dns = GetBool(dns, "enabled", false),
+                DnsEmbedded = GetBool(dns, "embedded", true),
                 DnsUpstreamServers = GetDnsServers(dns),
                 DnsStripEdns = GetBool(dns, "strip_edns", true),
                 DnsForceTcp = GetBool(dns, "force_tcp", false),
@@ -122,7 +125,8 @@ namespace WifiHotspot
                 MonitorEnabled = GetBool(monitor, "enabled", true),
                 MonitorTtl = GetBool(monitor, "ttl", true),
                 MonitorUa = GetBool(monitor, "ua", true),
-                MonitorTls = GetBool(monitor, "tls", true)
+                MonitorTls = GetBool(monitor, "tls", true),
+                MonitorDns = GetBool(monitor, "dns", true)
             };
         }
 
@@ -225,6 +229,7 @@ namespace WifiHotspot
             SetBool(monitor, "ttl", settings.MonitorTtl);
             SetBool(monitor, "ua", settings.MonitorUa);
             SetBool(monitor, "tls", settings.MonitorTls);
+            SetBool(monitor, "dns", settings.MonitorDns);
 
             IDictionary<string, object> network = GetOrCreateDict(root, "network");
             SetBool(network, "enabled", settings.NetworkEnabled);
@@ -250,6 +255,8 @@ namespace WifiHotspot
             SetBool(GetOrCreateDict(deviceforge, "udp"), "enabled", settings.Udp);
             IDictionary<string, object> dnsSettings = GetOrCreateDict(deviceforge, "dns");
             SetBool(dnsSettings, "enabled", settings.Dns);
+            SetBool(dnsSettings, "embedded", settings.DnsEmbedded);
+            SetInt(dnsSettings, "cache_size", 4096);
             dnsSettings["upstream_servers"] = NormalizeDnsServerArray(settings.DnsUpstreamServers);
             SetBool(dnsSettings, "strip_edns", settings.DnsStripEdns);
             SetBool(dnsSettings, "force_tcp", settings.DnsForceTcp);
@@ -385,7 +392,7 @@ namespace WifiHotspot
   ""auto_reload"": true,
   ""gui_auto_start_proxy"": true,
 
-   ""monitor"": { ""enabled"": true, ""ttl"": true, ""ua"": true, ""tls"": true },
+   ""monitor"": { ""enabled"": true, ""ttl"": true, ""ua"": true, ""tls"": true, ""dns"": true },
    ""network"": { ""enabled"": false, ""ttl"": 128, ""ipid"": true, ""tcp_options"": true, ""forward"": true, ""mtu_clamp_enabled"": false, ""mss_clamp"": 1460 },
   ""tun"": { ""enabled"": false, ""name"": ""OneNetShare Tunnel"", ""ip"": ""10.66.0.1"", ""gateway_ip"": ""10.66.0.2"", ""prefix_len"": 24, ""route"": true, ""upstream_interface"": """", ""ttl"": 128 },
   ""log"": { ""level"": ""info"", ""file"": "" },
@@ -394,7 +401,7 @@ namespace WifiHotspot
     ""target_os"": ""windows-11"",
     ""headers"": true,
     ""udp"": { ""enabled"": false },
-    ""dns"": { ""enabled"": false, ""strip_edns"": true, ""force_tcp"": false, ""min_ttl"": 60, ""max_ttl"": 86400, ""upstream_servers"": [""1.1.1.1""] },
+    ""dns"": { ""enabled"": false, ""embedded"": true, ""cache_size"": 4096, ""strip_edns"": true, ""force_tcp"": false, ""min_ttl"": 60, ""max_ttl"": 86400, ""upstream_servers"": [""1.1.1.1""] },
     ""ntp"": { ""enabled"": false },
     ""mdns"": { ""enabled"": false },
     ""dhcp"": { ""enabled"": false },

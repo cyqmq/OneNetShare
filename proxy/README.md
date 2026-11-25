@@ -12,6 +12,7 @@ Go 单文件二进制，双端部署：OpenWrt 网关透明劫持（REDIRECT 模
 - **状态端点**：`http://127.0.0.1:18089/status`
 - **DeviceForge**：总开关式终端特征收敛，统一 Header / UDP / DNS / NTP / mDNS / DHCP 指纹
 - **核心监控（只读）**：`monitor` 开关记录原始/改写后的 HTTP User-Agent；HTTPS 不解密，仅在 CONNECT/透明转发入口被动解析首个 ClientHello 的 SNI 与 JA3；90 秒内手机 UA 与电脑流量混杂且随后断开时写入 `[probe][监控证据]`
+- **内嵌 DNS 服务+缓存**：`deviceforge.dns.embedded=true` 时手机 UDP:53 查询先查本地缓存，未命中经出口网卡配置的 DNS 上游查询；支持 TTL 递减、负缓存、EDNS 清理与 TCP 上游
 - **Captive 探测处置**：由路由器代答或 Drop，避免 Apple/Windows/Android/Firefox 探测外泄
 
 ## 底层指纹统一原理（重要）
@@ -145,7 +146,7 @@ GOOS=windows GOARCH=386 CGO_ENABLED=0 go build -o build/hotspot-proxy-win-x86.ex
      "target_os": "windows-11",
      "headers": true,
      "udp": {"enabled": true, "listen": "0.0.0.0:18500", "all_ports": true, "target_ports": [53, 123, 443, 5353]},
-     "dns": {"enabled": true, "strip_edns": true, "force_tcp": false, "min_ttl": 60, "max_ttl": 86400, "upstream_servers": ["1.1.1.1"]},
+      "dns": {"enabled": true, "embedded": true, "cache_size": 4096, "strip_edns": true, "force_tcp": false, "min_ttl": 60, "max_ttl": 86400, "upstream_servers": ["1.1.1.1"]},
      "ntp": {"enabled": true, "server": "pool.ntp.org", "rewrite_refid": true},
      "mdns": {"enabled": true, "hostname": "gateway", "service": "_workstation._tcp.local"},
      "dhcp": {"enabled": true, "vendor_class": "MSFT 5.0", "client_id": ""},
@@ -183,7 +184,9 @@ GOOS=windows GOARCH=386 CGO_ENABLED=0 go build -o build/hotspot-proxy-win-x86.ex
 
 内置画像按“单一画像源”生成：UA、`sec-ch-ua`、`sec-ch-ua-full-version-list`、`sec-ch-ua-mobile` 与平台版本都来自同一浏览器版本/平台；Firefox 与 Safari 不携带 Chromium Client Hints。`ua_preset` 从内置 UA 库选择预设并自动套用完整 Header，不需要手输 UA；`user_agent_override` 仅保留给旧配置兼容。规则的 `profile: "default"` 会跟随 `default_profile`。`ipv6_guard_enabled` 是 Windows GUI 侧的 IPv6 转发封禁总开关，`ipv6_policy` 是封禁策略键：开关启用且检测到公网 IPv6 时，`block` 丢弃全部转发 IPv6，`ula-only` 仅允许 ULA/Link-local，`allow` 显式放弃该保护；`hotspot-proxy` 本身不实现 IPv6 转发封禁。
 
-`monitor` 默认全部启用：`monitor.ua` 在 Header 改写前后记录原始 UA 与生效 UA；`monitor.tls` 只在 CONNECT/透明转发入口 `Peek` 首个 TLS record 并解析 SNI/JA3，不解密、不 MITM、不改变转发字节；解析超时（400ms）或非 TLS 首包会直接放行。`monitor.ttl` 由 Windows GUI 侧 `TrafficMonitor.cs` 使用 WinDivert `SNIFF` 只读捕获，按 `(协议, 目标 IP, 目标端口, 源端口)` 关联手机→电脑与 NAT 后电脑→网关的同流 TTL，按目标端点做 NAT 改端口兜底；同流 TTL 相差 1 时写入 `[probe][TTL证据]`。90 秒内手机 UA≥3 且电脑 UA≥1，并在最后一次 UA 后 20 秒内出现断连时，代理写入 `[probe][监控证据]`；该结论仅作为诊断证据，不代表已经确认认证网关规则。
+`monitor` 默认全部启用：`monitor.ua` 在 Header 改写前后记录原始 UA 与生效 UA；`monitor.tls` 只在 CONNECT/透明转发入口 `Peek` 首个 TLS record 并解析 SNI/JA3，不解密、不 MITM、不改变转发字节；解析超时（400ms）或非 TLS 首包会直接放行。`monitor.ttl` 由 Windows GUI 侧 `TrafficMonitor.cs` 使用 WinDivert `SNIFF` 只读捕获，按 `(协议, 目标 IP, 目标端口, 源端口)` 关联手机→电脑与 NAT 后电脑→网关的同流 TTL，按目标端点做 NAT 改端口兜底；同流 TTL 相差 1 时写入 `[probe][TTL证据]`。`monitor.dns` 由 Windows GUI 侧 `DnsMonitor.cs` 只读 sniff UDP:53：手机查询到达电脑但未见上行/回包时写 `[probe][DNS证据]` 判定代理未运行或拦截未生效；全局 TUN 模式仍运行该监控。90 秒内手机 UA≥3 且电脑 UA≥1，并在最后一次 UA 后 20 秒内出现断连时，代理写入 `[probe][监控证据]`；该结论仅作为诊断证据，不代表已经确认认证网关规则。
+
+`deviceforge.dns.embedded=true` 时，普通 DNS 查询不再按原始目标地址透明转发，而是由代理先查缓存；缓存 key 包含完整问题段并忽略事务 ID，命中时按经过时间递减 TTL 并写回查询 ID。未命中时从 `upstream_servers` 轮换上游，默认 UDP:53，`force_tcp=true` 改为代理到上游使用 TCP（不再向手机返回 TC 要求重试）；上游响应经 `NormalizeDNSResponse` 清理 AD/CD、按 `strip_edns` 去 OPT、钳制 TTL 后入缓存。`cache_size` 限制缓存条目数，`min_ttl` 同时作为无 TTL 响应的兜底缓存时间。GUI 的“读取出口 DNS”会从所选出口网卡读取 IPv4 DNS 写入 `upstream_servers`；为空时回退 `1.1.1.1`。该内嵌 resolver 在 TUN/redirect 的 UDP:53 拦截路径生效；Windows ICS 原生模式下 UDP:53 由 ICS 占用，需开启全局 TUN 才能接手。
 
 Windows 下 `tun.enabled=true` 使用 Wintun 全局接管：需把官方 x86 `wintun.dll` 放在 `hotspot-proxy.exe` 同目录并以管理员运行。GUI 会列出真实物理网卡供用户选择出口网卡；`upstream_interface` 留空时自动读取 IPv4 默认路由对应的物理网卡，代理上游 TCP/UDP 会绑定到该网卡，避免流量重新进入 TUN。退出时通过 `GET /shutdown` 或直接信号恢复路由。`tun.ttl` 与 GUI 的“强制 TTL”共用：Windows 画像推荐 128，Android/macOS/iOS/Linux 画像推荐 64，GUI 切换画像时会自动填入并显示防呆提示。`network.mtu_clamp_enabled=true` 时，WinDivert SYN MSS 与 Wintun 合成 SYN-ACK MSS 都会被钳制到 `mss_clamp`；遇到 TLS 握手卡住时可将 1460 降到 1360/1280。`deviceforge.dns.upstream_servers` 可填写最多 3 个 IPv4 DNS（逗号/分号/空格分隔，GUI 上游 DNS 输入框同样支持），Wintun 接管默认路由时会在虚拟网卡设置主/备 DNS，DNS 查询仍经代理统一归一化；退出时恢复 DHCP DNS。经 GUI 启动的代理会把 `[probe]` 事件写入程序目录 `probe.log`，供代理功能窗口滚动显示 Captive/DNS/未知 UDP 事件。
 
@@ -220,7 +223,7 @@ iptables -t nat -L HOTSPOT_PROXY -n -v
 iptables -t filter -L HOTSPOT_PORTAL -n -v
 ```
 
-`/status` 会输出 `version`、`revision`、`pid`、`exe`、`generation`、当前 `ua_preset` 以及 `monitor=总开关/TTL/UA/TLS`、`ua_phone`、`ua_desktop`、`tls`、`alerts`；GUI 用 `generation` 判断 18080 上的进程是否仍是当前配置，不匹配会自动重启该进程。
+`/status` 会输出 `version`、`revision`、`pid`、`exe`、`generation`、当前 `ua_preset` 以及 `monitor=总开关/TTL/UA/TLS`（GUI 配置另有 `monitor.dns`）、`ua_phone`、`ua_desktop`、`tls`、`alerts`，以及 `dns_embedded`、`dns_cache`、`dns_queries`、`dns_hits`、`dns_misses`、`dns_upstream_ok`、`dns_upstream_err`；GUI 用 `generation` 判断 18080 上的进程是否仍是当前配置，不匹配会自动重启该进程。
 
 ### Windows 原型
 

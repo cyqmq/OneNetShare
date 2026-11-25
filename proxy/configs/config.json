@@ -57,6 +57,8 @@
     },
     "dns": {
       "enabled": true,
+      "embedded": true,
+      "cache_size": 4096,
       "strip_edns": true,
       "force_tcp": false,
       "min_ttl": 60,

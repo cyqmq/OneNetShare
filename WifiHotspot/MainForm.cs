@@ -153,7 +153,7 @@ namespace WifiHotspot
             }
 
             lblStatus.ForeColor = color;
-            lblStatus.Text = string.Format("热点状态: {0}\n支持检测: {1}\n代理/网络层/TTL: {2}", statusText, support.Message, ModuleStatusText());
+            lblStatus.Text = string.Format("热点状态: {0}\n支持检测: {1}\n代理/网络层/TTL/DNS: {2}", statusText, support.Message, ModuleStatusText());
         }
 
         private void ShowHotspotDiagnosis(string message, IcsManager.NetworkAdapterInfo adapter)
@@ -254,6 +254,13 @@ namespace WifiHotspot
                         if (!monitorResult.Success)
                             ShowHotspotDiagnosis("TTL 跳数监控启动失败：\n" + monitorResult.Message, selected);
                     }
+                    if (settings.MonitorEnabled && settings.MonitorDns)
+                    {
+                        var dnsResult = DnsMonitor.Shared.Start(settings);
+                        proxyMessage += "\n" + dnsResult.Message;
+                        if (!dnsResult.Success)
+                            ShowHotspotDiagnosis("DNS 端口监控启动失败：\n" + dnsResult.Message, selected);
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -288,6 +295,8 @@ namespace WifiHotspot
                     proxyMessage += "\n" + PortalGuard.Stop().Message;
                     if (settings.MonitorEnabled || TrafficMonitor.Shared.IsRunning)
                         proxyMessage += "\n" + TrafficMonitor.Shared.Stop().Message;
+                    if (settings.MonitorEnabled || DnsMonitor.Shared.IsRunning)
+                        proxyMessage += "\n" + DnsMonitor.Shared.Stop().Message;
                 }
                 catch { }
                 MessageBox.Show(result.Message + proxyMessage, "停止结果", MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -334,9 +343,16 @@ namespace WifiHotspot
                 string detail;
                 if (_manager.GetStatus(out detail) != HotspotStatus.Running) return;
                 ProxySettings settings = ProxyConfigManager.Load();
-                if (!settings.MonitorEnabled || !settings.MonitorTtl) return;
-                var result = TrafficMonitor.Shared.Start(settings);
-                if (!result.Success) ShowHotspotDiagnosis("TTL 跳数监控启动失败:\n" + result.Message, null);
+                if (settings.MonitorEnabled && settings.MonitorTtl)
+                {
+                    var result = TrafficMonitor.Shared.Start(settings);
+                    if (!result.Success) ShowHotspotDiagnosis("TTL 跳数监控启动失败:\n" + result.Message, null);
+                }
+                if (settings.MonitorEnabled && settings.MonitorDns)
+                {
+                    var dnsResult = DnsMonitor.Shared.Start(settings);
+                    if (!dnsResult.Success) ShowHotspotDiagnosis("DNS 端口监控启动失败:\n" + dnsResult.Message, null);
+                }
             }
             catch (Exception ex)
             {
@@ -348,6 +364,7 @@ namespace WifiHotspot
         {
             try { NetworkNormalizer.Shared.Stop(); } catch { }
             try { TrafficMonitor.Shared.Stop(); } catch { }
+            try { DnsMonitor.Shared.Stop(); } catch { }
         }
 
         private void btnSave_Click(object sender, EventArgs e)
@@ -383,7 +400,8 @@ namespace WifiHotspot
                 else network = "未运行";
             }
             string monitor = TrafficMonitor.Shared.IsRunning ? "TTL监控运行" : "TTL监控未运行";
-            return proxy + " / " + network + " / " + monitor;
+            string dns = DnsMonitor.Shared.IsRunning ? "DNS监控运行" : "DNS监控未运行";
+            return proxy + " / " + network + " / " + monitor + " / " + dns;
         }
 
         private void timerStatus_Tick(object sender, EventArgs e)
@@ -396,7 +414,7 @@ namespace WifiHotspot
             if (status == HotspotStatus.Running)
             {
                 lblStatus.ForeColor = Color.Green;
-                lblStatus.Text = "热点状态: " + detail + "\nSSID: " + txtSsid.Text + "\n代理/网络层/TTL: " + moduleState;
+                lblStatus.Text = "热点状态: " + detail + "\nSSID: " + txtSsid.Text + "\n代理/网络层/TTL/DNS: " + moduleState;
                 btnStart.Enabled = false;
                 btnStop.Enabled = isAdmin;
                 RefreshClients();
@@ -404,7 +422,7 @@ namespace WifiHotspot
             else if (status == HotspotStatus.Stopped)
             {
                 lblStatus.ForeColor = Color.DarkOrange;
-                lblStatus.Text = "热点状态: " + detail + "\n代理/网络层/TTL: " + moduleState;
+                lblStatus.Text = "热点状态: " + detail + "\n代理/网络层/TTL/DNS: " + moduleState;
                 btnStart.Enabled = isAdmin;
                 btnStop.Enabled = false;
                 lstClients.Items.Clear();
@@ -412,7 +430,7 @@ namespace WifiHotspot
             else
             {
                 lblStatus.ForeColor = Color.Red;
-                lblStatus.Text = "热点状态: " + detail + "\n状态检测失败，可尝试启动/停止\n代理/网络层/TTL: " + moduleState;
+                lblStatus.Text = "热点状态: " + detail + "\n状态检测失败，可尝试启动/停止\n代理/网络层/TTL/DNS: " + moduleState;
                 btnStart.Enabled = isAdmin;
                 btnStop.Enabled = isAdmin;
                 lstClients.Items.Clear();
