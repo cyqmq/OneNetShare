@@ -32,7 +32,7 @@
 - 代理自动诊断：启动失败时自动检查 `config.json`、端口格式/占用/Windows 保留端口范围、退出码、进程输出与 `probe.log`，给出端口/权限/文件/TUN 出口网卡等具体原因；代理功能窗口提供“自动诊断”按钮；一键测试会比对配置生成号与代理 `/status`，发现旧进程时自动重启并显示版本/路径；`probe.log` 被代理占用时日志面板与诊断改为共享读
 - 网络层指纹归一化：基于 WinDivert 在 Windows 网卡出口强制重写 IPv4 TTL/IPID、IPv6 Hop Limit 与 traffic class/Flow Label 清零、TCP SYN 选项；Flow Label 清零只用于指纹收敛，不代表 IPv6 隐私安全；已随包附带官方 WinDivert 2.2.2 x86 `WinDivert.dll`、`WinDivert32.sys`、`WinDivert64.sys`，需管理员权限
 - Wintun 全局 TUN 接管：创建 `OneNetShare Tunnel` 虚拟网卡，只接管 IPv4 默认路由/DNS，在用户态重建 UDP/DNS/NTP 会话并统一出口包指纹，TCP 80 流同样应用 HTTP Header 画像；需要官方 x86 `wintun.dll` 和管理员权限
-- IPv6 隐私保护：默认在 WinDivert `NETWORK_FORWARD` 层丢弃全部转发 IPv6，防止手机取得 GUA 后绕过 IPv4 NAT/代理裸奔；可选仅允许 ULA/Link-local 或显式允许 IPv6（不安全），热点启动即生效，与 TUN/网络层归一化互斥关系无关；自动诊断和一键测试会报告热点网卡上的全局 IPv6 地址
+- IPv6 隐私保护：可在 GUI 中一键启用/关闭 IPv6 转发封禁。启用时，若热点虚拟网卡检测到公网/全局 IPv6(GUA) 则在 WinDivert `NETWORK_FORWARD` 层丢弃转发 IPv6，防止手机绕过 IPv4 NAT/代理裸奔；仅 ULA/Link-local 时不启动封禁；可选仅允许 ULA/Link-local 或显式允许 IPv6（不安全）。关闭后不启动 WinDivert 封禁。
 - 自动配置 ICS（Internet Connection Sharing）网络共享
 - 可自定义 SSID、密码（8-63 位 WPA2）
 - 选择用于共享上网的物理网卡

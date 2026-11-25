@@ -45,6 +45,7 @@ namespace WifiHotspot
         private readonly ComboBox cmbProfile;
         private readonly ComboBox cmbUaPreset;
         private readonly ComboBox cmbIpv6Policy;
+        private readonly CheckBox chkIpv6Guard;
         private readonly CheckBox chkPortalBlock;
         private readonly TextBox txtPortalPrimary;
         private readonly TextBox txtPortalSecondary;
@@ -126,8 +127,9 @@ namespace WifiHotspot
             cmbUaPreset.ValueMember = "Key";
             cmbUaPreset.SelectedValue = uaPresets.ContainsKey(settings.UAPreset) ? settings.UAPreset : "chrome-158-windows";
             var lblUserAgentHint = new Label { Location = new Point(550, 390), Size = new Size(85, 32), ForeColor = Color.Gray, Text = "内置 UA 库，自动对齐 Client Hints" };
-            var lblIPv6Policy = new Label { Location = new Point(15, 423), AutoSize = true, Text = "IPv6 策略:" };
-            cmbIpv6Policy = new ComboBox { Location = new Point(95, 420), Size = new Size(450, 23), DropDownStyle = ComboBoxStyle.DropDownList };
+            chkIpv6Guard = NewCheck("启用 IPv6 转发封禁", settings.IPv6GuardEnabled, 15, 423);
+            var lblIPv6Policy = new Label { Location = new Point(170, 426), AutoSize = true, Text = "策略:" };
+            cmbIpv6Policy = new ComboBox { Location = new Point(210, 423), Size = new Size(335, 23), DropDownStyle = ComboBoxStyle.DropDownList, Enabled = settings.IPv6GuardEnabled };
             var ipv6Policies = ProxyConfigManager.GetIPv6Policies();
             var ipv6PolicyList = new List<KeyValuePair<string, string>>();
             foreach (KeyValuePair<string, string> item in ipv6Policies) ipv6PolicyList.Add(item);
@@ -135,7 +137,7 @@ namespace WifiHotspot
             cmbIpv6Policy.DisplayMember = "Value";
             cmbIpv6Policy.ValueMember = "Key";
             cmbIpv6Policy.SelectedValue = ipv6Policies.ContainsKey(settings.IPv6Policy) ? settings.IPv6Policy : "block";
-            var lblIPv6Hint = new Label { Location = new Point(550, 420), Size = new Size(85, 32), ForeColor = Color.DarkRed, Text = "IPv6 无 NAT，默认封禁转发" };
+            var lblIPv6Hint = new Label { Location = new Point(550, 420), Size = new Size(85, 32), ForeColor = Color.DarkRed, Text = "有 GUA 时建议封禁" };
             chkPortalBlock = NewCheck("封堵认证门户主/备 IP（禁手机后台弹窗）", settings.PortalBlockEnabled, 15, 450);
             var lblPortalPrimary = new Label { Location = new Point(300, 453), AutoSize = true, Text = "主IP:" };
             txtPortalPrimary = NewText(settings.PortalPrimaryIP, 340, 450, 110);
@@ -144,6 +146,8 @@ namespace WifiHotspot
 
             chkTun.CheckedChanged += delegate { chkNetwork.Enabled = !chkTun.Checked; };
             chkNetwork.Enabled = !settings.TunEnabled;
+            chkIpv6Guard.CheckedChanged += delegate { cmbIpv6Policy.Enabled = chkIpv6Guard.Checked; };
+            cmbIpv6Policy.Enabled = settings.IPv6GuardEnabled;
             chkMtuClamp.CheckedChanged += delegate { numMssClamp.Enabled = chkMtuClamp.Checked; };
             cmbProfile.SelectedIndexChanged += delegate { ApplyProfileTTL(); };
             numTTL.ValueChanged += delegate { if (!_updatingTtlFromProfile) UpdateTtlHint(); };
@@ -188,6 +192,7 @@ namespace WifiHotspot
             implemented.Controls.Add(lblUserAgent);
             implemented.Controls.Add(cmbUaPreset);
             implemented.Controls.Add(lblUserAgentHint);
+            implemented.Controls.Add(chkIpv6Guard);
             implemented.Controls.Add(lblIPv6Policy);
             implemented.Controls.Add(cmbIpv6Policy);
             implemented.Controls.Add(lblIPv6Hint);
@@ -230,7 +235,7 @@ namespace WifiHotspot
             lblResult.Text = (ProxyProcessManager.IsRunning() ? "代理运行" : "代理未运行") +
                              "；Wintun.dll " + (HotspotManager.WintunAvailable() ? "存在" : "缺失") +
                              "；网络层归一化 " + (NetworkNormalizer.Shared.IsRunning ? "运行" : "未运行（" + NetworkNormalizer.Shared.LastMessage + "）") +
-                             "；IPv6 " + (IPv6Guard.IsRunning ? "运行" : (IPv6Guard.IsEnabled(settings.IPv6Policy) ? "未运行" : "未启用")) +
+                             "；IPv6 封禁 " + (!settings.IPv6GuardEnabled ? "已关闭" : (IPv6Guard.IsRunning ? "运行" : "未运行")) +
                              "；Portal " + (PortalGuard.IsRunning ? "运行" : "未运行");
 
             var panel = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 48, FlowDirection = FlowDirection.RightToLeft, WrapContents = false, Padding = new Padding(8, 8, 8, 8) };
@@ -743,6 +748,7 @@ namespace WifiHotspot
                 UAPreset = cmbUaPreset.SelectedValue == null ? "" : cmbUaPreset.SelectedValue.ToString(),
                 UserAgentOverride = "",
                 IPv6Policy = cmbIpv6Policy.SelectedValue == null ? "block" : cmbIpv6Policy.SelectedValue.ToString(),
+                IPv6GuardEnabled = chkIpv6Guard.Checked,
                 PortalBlockEnabled = chkPortalBlock.Checked,
                 PortalPrimaryIP = txtPortalPrimary.Text.Trim(),
                 PortalSecondaryIP = txtPortalSecondary.Text.Trim()
@@ -762,7 +768,7 @@ namespace WifiHotspot
         {
             ProxySettings settings = Collect();
             ProxyConfigManager.Save(settings, _configPath);
-            lblResult.Text = "配置已保存。" + ApplyNetwork(settings) + TuneWarning(settings);
+            lblResult.Text = "配置已保存。" + ApplyNetwork(settings) + "；" + ApplyIPv6Guard(settings) + TuneWarning(settings);
         }
 
         private void SaveAndRestart(object sender, EventArgs e)
@@ -770,7 +776,7 @@ namespace WifiHotspot
             ProxySettings settings = Collect();
             ProxyConfigManager.Save(settings, _configPath);
             string result = ProxyProcessManager.IsRunning() ? ProxyProcessManager.Stop() + "；" + ProxyProcessManager.Start(_configPath) : ProxyProcessManager.Start(_configPath);
-            lblResult.Text = result + "；" + ApplyNetwork(settings) + TuneWarning(settings);
+            lblResult.Text = result + "；" + ApplyNetwork(settings) + "；" + ApplyIPv6Guard(settings) + TuneWarning(settings);
             ShowProxyDiagnosticIfNeeded();
         }
 
@@ -816,6 +822,13 @@ namespace WifiHotspot
         private static string ApplyNetwork(ProxySettings settings)
         {
             return settings.TunEnabled ? string.Empty : (settings.NetworkEnabled ? NetworkNormalizer.Shared.Start(settings).Message : NetworkNormalizer.Shared.Stop().Message);
+        }
+
+        private static string ApplyIPv6Guard(ProxySettings settings)
+        {
+            if (!settings.IPv6GuardEnabled) return IPv6Guard.Stop().Message;
+            if (ProxyDiagnostics.FindHotspotGlobalIPv6().Count == 0) return "IPv6 封禁已启用（当前无公网 IPv6，不启动）";
+            return IPv6Guard.Start(settings.IPv6Policy).Message;
         }
 
         private void OpenConfig(object sender, EventArgs e)

@@ -218,7 +218,7 @@ namespace WifiHotspot
                             ShowHotspotDiagnosis("全局 TUN 代理启动失败：\n" + proxyMessage, selected);
                     }
                     List<string> globalIPv6 = ProxyDiagnostics.FindHotspotGlobalIPv6();
-                    bool needIPv6Guard = globalIPv6.Count > 0;
+                    bool needIPv6Guard = settings.IPv6GuardEnabled && globalIPv6.Count > 0;
                     if (needIPv6Guard)
                     {
                         string policy = "block";
@@ -235,7 +235,9 @@ namespace WifiHotspot
                     }
                     else
                     {
-                        proxyMessage += "\n未检测到热点网卡公网 IPv6（仅 ULA/Link-local），未启用 IPv6 封禁。";
+                        proxyMessage += !settings.IPv6GuardEnabled
+                            ? "\nIPv6 封禁开关已关闭，未启用 IPv6 转发封禁。"
+                            : "\n未检测到热点网卡公网 IPv6（仅 ULA/Link-local），未启用 IPv6 封禁。";
                     }
                     if (settings.PortalBlockEnabled)
                     {
@@ -273,7 +275,8 @@ namespace WifiHotspot
                     ProxySettings settings = ProxyConfigManager.Load();
                     if (settings.AutoStartProxy)
                         proxyMessage = "\n" + ProxyProcessManager.Stop();
-                    proxyMessage += "\n" + IPv6Guard.Stop().Message;
+                    if (settings.IPv6GuardEnabled || IPv6Guard.IsRunning)
+                        proxyMessage += "\n" + IPv6Guard.Stop().Message;
                     proxyMessage += "\n" + PortalGuard.Stop().Message;
                 }
                 catch { }

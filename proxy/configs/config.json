@@ -8,6 +8,7 @@
   "ua_preset": "chrome-158-windows",
   "user_agent_override": "",
   "ipv6_policy": "block",
+  "ipv6_guard_enabled": true,
   "auto_reload": true,
   "network": {
     "enabled": false,

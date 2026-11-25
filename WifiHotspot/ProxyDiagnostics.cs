@@ -112,24 +112,31 @@ namespace WifiHotspot
         {
             string path = string.IsNullOrEmpty(configPath) ? ProxyConfigManager.DefaultConfigPath : configPath;
             string policy = "block";
+            bool enabled = true;
             if (File.Exists(path))
             {
                 try
                 {
                     object parsed = new JavaScriptSerializer().DeserializeObject(File.ReadAllText(path, Encoding.UTF8));
                     IDictionary<string, object> root = parsed as IDictionary<string, object>;
-                    if (root != null) policy = GetString(root, "ipv6_policy", "block");
+                    if (root != null)
+                    {
+                        policy = GetString(root, "ipv6_policy", "block");
+                        enabled = GetBool(root, "ipv6_guard_enabled", true);
+                    }
                 }
                 catch { }
             }
 
-            lines.Add("IPv6 策略: " + policy + "；" + CheckIPv6Safety());
+            lines.Add("IPv6 封禁: " + (enabled ? "已启用" : "已关闭") + "；策略: " + policy + "；" + CheckIPv6Safety());
             List<string> global = FindHotspotGlobalIPv6();
             if (global.Count == 0)
                 lines.Add("[正常] 未检测到热点网卡公网/全局 IPv6 地址；仅 ULA(fdxx)/Link-local 时无需 IPv6 封禁。");
+            else if (!enabled)
+                lines.Add("[警告] 检测到热点网卡公网/全局 IPv6 地址，但 IPv6 封禁已关闭；客户端可能通过 IPv6 裸奔绕过代理。");
             else if (!IPv6Guard.IsRunning)
                 lines.Add("[警告] 检测到热点网卡公网/全局 IPv6 地址，热点启动时将自动启用封禁；单改 Flow Label 不足以防止 IPv6 裸奔。");
-            if (global.Count > 0 && IPv6Guard.IsEnabled(policy) && !IPv6Guard.IsRunning)
+            if (enabled && global.Count > 0 && IPv6Guard.IsEnabled(policy) && !IPv6Guard.IsRunning)
                 lines.Add("[警告] 配置要求封禁 IPv6 转发，但 WinDivert 封禁当前未运行；热点启动后才会生效。");
         }
 
@@ -175,6 +182,10 @@ namespace WifiHotspot
                 return "IPv6 安全: 检测到公网 IPv6 " + string.Join(", ", globalAddresses.ToArray()) +
                        "，转发封禁正在运行";
 
+            ProxySettings settings = ProxyConfigManager.Load();
+            if (!settings.IPv6GuardEnabled)
+                return "IPv6 裸露风险: 热点虚拟网卡检测到公网 IPv6 " + string.Join(", ", globalAddresses.ToArray()) +
+                       "；IPv6 封禁已关闭，客户端可能绕过 IPv4 代理";
             return "IPv6 裸露风险: 热点虚拟网卡检测到公网 IPv6 " + string.Join(", ", globalAddresses.ToArray()) +
                    "；热点启动将自动封禁全部转发 IPv6，单改 Flow Label 不足够";
         }

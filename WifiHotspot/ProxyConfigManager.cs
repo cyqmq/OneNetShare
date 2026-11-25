@@ -37,6 +37,7 @@ namespace WifiHotspot
         public string UAPreset { get; set; }
         public string UserAgentOverride { get; set; }
         public string IPv6Policy { get; set; }
+        public bool IPv6GuardEnabled { get; set; }
         public bool PortalBlockEnabled { get; set; }
         public string PortalPrimaryIP { get; set; }
         public string PortalSecondaryIP { get; set; }
@@ -99,6 +100,7 @@ namespace WifiHotspot
                 UAPreset = GetString(root, "ua_preset", ""),
                 UserAgentOverride = GetString(root, "user_agent_override", ""),
                 IPv6Policy = GetString(root, "ipv6_policy", "block"),
+                IPv6GuardEnabled = GetBool(root, "ipv6_guard_enabled", true),
                 PortalBlockEnabled = GetBool(root, "portal_block_enabled", false),
                 PortalPrimaryIP = GetString(root, "portal_primary_ip", ""),
                 PortalSecondaryIP = GetString(root, "portal_secondary_ip", "")
@@ -193,6 +195,7 @@ namespace WifiHotspot
             SetString(root, "ua_preset", settings.UAPreset ?? "");
             SetString(root, "user_agent_override", settings.UserAgentOverride ?? "");
             SetString(root, "ipv6_policy", string.IsNullOrEmpty(settings.IPv6Policy) ? "block" : settings.IPv6Policy);
+            SetBool(root, "ipv6_guard_enabled", settings.IPv6GuardEnabled);
             SetBool(root, "portal_block_enabled", settings.PortalBlockEnabled);
             SetString(root, "portal_primary_ip", settings.PortalPrimaryIP ?? "");
             SetString(root, "portal_secondary_ip", settings.PortalSecondaryIP ?? "");
@@ -295,6 +298,7 @@ namespace WifiHotspot
   ""ua_preset"": ""chrome-158-windows"",
   ""user_agent_override"": """",
   ""ipv6_policy"": ""block"",
+  ""ipv6_guard_enabled"": true,
   ""portal_block_enabled"": false,
   ""portal_primary_ip"": """",
   ""portal_secondary_ip"": """",
