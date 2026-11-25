@@ -135,8 +135,8 @@ namespace WifiHotspot
                 case HotspotStatus.Error:
                 default:
                     color = Color.Red;
-                    btnStart.Enabled = support.Success;
-                    btnStop.Enabled = false;
+                    btnStart.Enabled = true;
+                    btnStop.Enabled = true;
                     break;
             }
 
@@ -253,9 +253,9 @@ namespace WifiHotspot
             else
             {
                 lblStatus.ForeColor = Color.Red;
-                lblStatus.Text = "热点状态: " + detail;
-                btnStart.Enabled = false;
-                btnStop.Enabled = false;
+                lblStatus.Text = "热点状态: " + detail + "\n状态检测失败，可尝试启动/停止";
+                btnStart.Enabled = isAdmin;
+                btnStop.Enabled = isAdmin;
                 lstClients.Items.Clear();
             }
         }

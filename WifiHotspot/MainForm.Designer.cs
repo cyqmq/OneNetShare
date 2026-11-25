@@ -113,21 +113,27 @@ namespace WifiHotspot
             this.cmbAdapter.TabIndex = 6;
 
             // btnStart
+            this.btnStart.BackColor = System.Drawing.Color.FromArgb(25, 135, 84);
+            this.btnStart.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+            this.btnStart.ForeColor = System.Drawing.Color.White;
             this.btnStart.Location = new System.Drawing.Point(12, 163);
             this.btnStart.Name = "btnStart";
             this.btnStart.Size = new System.Drawing.Size(105, 35);
             this.btnStart.TabIndex = 7;
             this.btnStart.Text = "启动热点";
-            this.btnStart.UseVisualStyleBackColor = true;
+            this.btnStart.UseVisualStyleBackColor = false;
             this.btnStart.Click += new System.EventHandler(this.btnStart_Click);
 
             // btnStop
+            this.btnStop.BackColor = System.Drawing.Color.FromArgb(220, 53, 69);
+            this.btnStop.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
+            this.btnStop.ForeColor = System.Drawing.Color.White;
             this.btnStop.Location = new System.Drawing.Point(123, 163);
             this.btnStop.Name = "btnStop";
             this.btnStop.Size = new System.Drawing.Size(105, 35);
             this.btnStop.TabIndex = 8;
             this.btnStop.Text = "停止热点";
-            this.btnStop.UseVisualStyleBackColor = true;
+            this.btnStop.UseVisualStyleBackColor = false;
             this.btnStop.Click += new System.EventHandler(this.btnStop_Click);
 
             // btnRefresh
