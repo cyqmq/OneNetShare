@@ -222,6 +222,7 @@ namespace WifiHotspot
             this.Controls.Add(this.grpStatus);
             this.Controls.Add(this.grpClients);
             this.Controls.Add(this.lblFooter);
+            this.Font = new System.Drawing.Font("Microsoft YaHei", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
             this.FormBorderStyle = System.Windows.Forms.FormBorderStyle.FixedSingle;
             this.MaximizeBox = false;
             this.Name = "MainForm";

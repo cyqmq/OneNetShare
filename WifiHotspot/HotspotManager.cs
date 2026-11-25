@@ -44,12 +44,19 @@ namespace WifiHotspot
         {
             if (bytes == null || bytes.Length == 0) return string.Empty;
 
-            var candidates = new List<Encoding>();
-            if (bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF)
-                candidates.Add(new UTF8Encoding(false, false));
-            candidates.Add(new UTF8Encoding(false, true));
+            var strictUtf8 = new UTF8Encoding(false, true);
+            try
+            {
+                string utf8 = strictUtf8.GetString(bytes).TrimStart('\uFEFF');
+                if (!HasHighByte(bytes) || ContainsCjk(utf8))
+                {
+                    if (ScoreText(utf8) >= 0) return utf8;
+                }
+            }
+            catch (DecoderFallbackException) { }
 
-            foreach (int codePage in new[] { 936, 54936, System.Globalization.CultureInfo.CurrentCulture.TextInfo.OEMCodePage, Encoding.Default.CodePage })
+            var candidates = new List<Encoding>();
+            foreach (int codePage in new[] { 936, 54936, 950, System.Globalization.CultureInfo.CurrentCulture.TextInfo.OEMCodePage, Encoding.Default.CodePage })
             {
                 try { candidates.Add(Encoding.GetEncoding(codePage)); }
                 catch { }
@@ -61,7 +68,7 @@ namespace WifiHotspot
             {
                 try
                 {
-                    string decoded = encoding.GetString(bytes);
+                    string decoded = encoding.GetString(bytes).TrimStart('\uFEFF');
                     int score = ScoreText(decoded);
                     if (score > bestScore)
                     {
@@ -74,13 +81,32 @@ namespace WifiHotspot
             return best;
         }
 
+        private static bool HasHighByte(byte[] bytes)
+        {
+            foreach (byte b in bytes)
+            {
+                if (b >= 0x80) return true;
+            }
+            return false;
+        }
+
+        private static bool ContainsCjk(string text)
+        {
+            foreach (char c in text)
+            {
+                if ((c >= 0x3400 && c <= 0x4DBF) || (c >= 0x4E00 && c <= 0x9FFF) || (c >= 0xF900 && c <= 0xFAFF))
+                    return true;
+            }
+            return false;
+        }
+
         private static int ScoreText(string text)
         {
             int score = 0;
             foreach (char c in text)
             {
                 if (c == '\uFFFD') score -= 100;
-                else if (c >= 0x4E00 && c <= 0x9FFF) score += 10;
+                else if ((c >= 0x3400 && c <= 0x4DBF) || (c >= 0x4E00 && c <= 0x9FFF) || (c >= 0xF900 && c <= 0xFAFF)) score += 10;
                 else if (char.IsControl(c) && c != '\r' && c != '\n' && c != '\t') score -= 5;
             }
             return score;
