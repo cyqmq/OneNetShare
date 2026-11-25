@@ -167,6 +167,14 @@ namespace WifiHotspot
 
         public HotspotResult CheckSupport()
         {
+            if (MobileHotspotManager.IsAvailable)
+            {
+                string mobileDetail;
+                MobileHotspotState mobileState = MobileHotspotManager.GetState(out mobileDetail);
+                if (mobileState == MobileHotspotState.On || mobileState == MobileHotspotState.Off || mobileState == MobileHotspotState.InTransition)
+                    return new HotspotResult { Success = true, Message = "检测到 Windows 移动热点 API (WinRT)，将优先使用。\n" + mobileDetail };
+            }
+
             var r = RunCommand("netsh", "wlan show drivers");
             if (!r.Success)
                 return new HotspotResult { Success = false, Message = "无法读取无线网卡驱动信息。请确认已安装无线网卡且服务正常。" };
@@ -194,6 +202,20 @@ namespace WifiHotspot
         public HotspotStatus GetStatus(out string detail)
         {
             detail = string.Empty;
+
+            string mobileDetail;
+            MobileHotspotState mobileState = MobileHotspotManager.GetState(out mobileDetail);
+            if (mobileState == MobileHotspotState.On)
+            {
+                detail = "移动热点运行中";
+                return HotspotStatus.Running;
+            }
+            if (mobileState == MobileHotspotState.InTransition)
+            {
+                detail = mobileDetail;
+                return HotspotStatus.Error;
+            }
+
             var r = RunCommand("netsh", "wlan show hostednetwork");
             if (!r.Success)
             {
@@ -283,6 +305,26 @@ namespace WifiHotspot
 
         public HotspotResult Start(IcsManager.NetworkAdapterInfo internetAdapter, string ssid, string password)
         {
+            string modernError = string.Empty;
+            if (MobileHotspotManager.IsAvailable)
+            {
+                var modern = MobileHotspotManager.Start(ssid, password);
+                if (modern.Success)
+                    return modern;
+                modernError = "Windows 移动热点: " + modern.Message;
+            }
+
+            var legacy = StartLegacy(internetAdapter, ssid, password);
+            if (legacy.Success)
+                return legacy;
+
+            if (!string.IsNullOrEmpty(modernError))
+                return new HotspotResult { Success = false, Message = modernError + "\n\n传统承载网络: " + legacy.Message };
+            return legacy;
+        }
+
+        private HotspotResult StartLegacy(IcsManager.NetworkAdapterInfo internetAdapter, string ssid, string password)
+        {
             var prepare = PrepareHostedNetwork();
             if (!prepare.Success)
                 return prepare;
@@ -332,6 +374,24 @@ namespace WifiHotspot
         }
 
         public HotspotResult Stop()
+        {
+            var messages = new List<string>();
+            bool stopped = false;
+
+            if (MobileHotspotManager.IsAvailable)
+            {
+                var modern = MobileHotspotManager.Stop();
+                messages.Add("Windows 移动热点: " + modern.Message);
+                stopped = stopped || modern.Success;
+            }
+
+            var legacy = StopLegacy();
+            messages.Add("传统承载网络: " + legacy.Message);
+            stopped = stopped || legacy.Success;
+            return new HotspotResult { Success = stopped, Message = string.Join("\n", messages) };
+        }
+
+        private HotspotResult StopLegacy()
         {
             var adapters = _ics.GetSharingAdapters();
             foreach (var id in adapters)
