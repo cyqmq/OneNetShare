@@ -150,7 +150,8 @@ namespace WifiHotspot
             }
 
             lblStatus.ForeColor = color;
-            lblStatus.Text = string.Format("热点状态: {0}\n支持检测: {1}", statusText, support.Message);
+            lblStatus.Text = string.Format("热点状态: {0}\n支持检测: {1}\n代理: {2}", statusText, support.Message,
+                ProxyProcessManager.IsRunning() ? "运行中" : "未运行");
         }
 
         private void ShowHotspotDiagnosis(string message, IcsManager.NetworkAdapterInfo adapter)
@@ -197,7 +198,19 @@ namespace WifiHotspot
 
             var result = _manager.Start(selected, txtSsid.Text, txtPassword.Text);
             if (result.Success)
-                MessageBox.Show(result.Message, "启动结果", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            {
+                string proxyMessage = string.Empty;
+                try
+                {
+                    if (ProxyConfigManager.Load().AutoStartProxy)
+                        proxyMessage = "\n" + ProxyProcessManager.Start(ProxyConfigManager.DefaultConfigPath);
+                }
+                catch (Exception ex)
+                {
+                    proxyMessage = "\n代理自动启动失败: " + ex.Message;
+                }
+                MessageBox.Show(result.Message + proxyMessage, "启动结果", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
             else
                 ShowHotspotDiagnosis(result.Message, selected);
 
@@ -213,7 +226,16 @@ namespace WifiHotspot
 
             var result = _manager.Stop();
             if (result.Success)
-                MessageBox.Show(result.Message, "停止结果", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            {
+                string proxyMessage = string.Empty;
+                try
+                {
+                    if (ProxyConfigManager.Load().AutoStartProxy)
+                        proxyMessage = "\n" + ProxyProcessManager.Stop();
+                }
+                catch { }
+                MessageBox.Show(result.Message + proxyMessage, "停止结果", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
             else
                 ShowHotspotDiagnosis(result.Message, null);
 
@@ -224,6 +246,13 @@ namespace WifiHotspot
         private void btnRefresh_Click(object sender, EventArgs e)
         {
             RefreshAdapters();
+            CheckSupportAndStatus();
+        }
+
+        private void btnProxy_Click(object sender, EventArgs e)
+        {
+            using (var form = new ProxySettingsForm())
+                form.ShowDialog(this);
             CheckSupportAndStatus();
         }
 
@@ -247,11 +276,12 @@ namespace WifiHotspot
             string detail;
             HotspotStatus status = _manager.GetStatus(out detail);
             bool isAdmin = HotspotManager.IsAdministrator();
+            string proxyState = ProxyProcessManager.IsRunning() ? "运行中" : "未运行";
 
             if (status == HotspotStatus.Running)
             {
                 lblStatus.ForeColor = Color.Green;
-                lblStatus.Text = "热点状态: " + detail + "\nSSID: " + txtSsid.Text;
+                lblStatus.Text = "热点状态: " + detail + "\nSSID: " + txtSsid.Text + "\n代理: " + proxyState;
                 btnStart.Enabled = false;
                 btnStop.Enabled = isAdmin;
                 RefreshClients();
@@ -259,7 +289,7 @@ namespace WifiHotspot
             else if (status == HotspotStatus.Stopped)
             {
                 lblStatus.ForeColor = Color.DarkOrange;
-                lblStatus.Text = "热点状态: " + detail;
+                lblStatus.Text = "热点状态: " + detail + "\n代理: " + proxyState;
                 btnStart.Enabled = isAdmin;
                 btnStop.Enabled = false;
                 lstClients.Items.Clear();
@@ -267,7 +297,7 @@ namespace WifiHotspot
             else
             {
                 lblStatus.ForeColor = Color.Red;
-                lblStatus.Text = "热点状态: " + detail + "\n状态检测失败，可尝试启动/停止";
+                lblStatus.Text = "热点状态: " + detail + "\n状态检测失败，可尝试启动/停止\n代理: " + proxyState;
                 btnStart.Enabled = isAdmin;
                 btnStop.Enabled = isAdmin;
                 lstClients.Items.Clear();

@@ -124,7 +124,7 @@ func originalRequest(req *Request) string {
 
 func (e *Engine) Rewrite(req *Request, originalDst string) (string, string, error) {
 	cfg := e.loader.Get()
-	if !cfg.Enabled || (cfg.DeviceForge.Enabled && !cfg.DeviceForge.Headers) {
+	if !cfg.Enabled || !cfg.DeviceForge.Enabled || !cfg.DeviceForge.Headers {
 		return req.Proto, originalRequest(req), nil
 	}
 

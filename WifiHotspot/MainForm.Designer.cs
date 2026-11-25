@@ -28,6 +28,7 @@ namespace WifiHotspot
             this.btnStop = new System.Windows.Forms.Button();
             this.btnRefresh = new System.Windows.Forms.Button();
             this.btnSave = new System.Windows.Forms.Button();
+            this.btnProxy = new System.Windows.Forms.Button();
             this.grpStatus = new System.Windows.Forms.GroupBox();
             this.lblStatus = new System.Windows.Forms.Label();
             this.grpClients = new System.Windows.Forms.GroupBox();
@@ -48,6 +49,7 @@ namespace WifiHotspot
             this.grpSettings.Controls.Add(this.chkShowPassword);
             this.grpSettings.Controls.Add(this.lblAdapter);
             this.grpSettings.Controls.Add(this.cmbAdapter);
+            this.grpSettings.Controls.Add(this.btnProxy);
             this.grpSettings.Location = new System.Drawing.Point(12, 12);
             this.grpSettings.Name = "grpSettings";
             this.grpSettings.Size = new System.Drawing.Size(460, 145);
@@ -109,7 +111,7 @@ namespace WifiHotspot
             this.cmbAdapter.FormattingEnabled = true;
             this.cmbAdapter.Location = new System.Drawing.Point(120, 97);
             this.cmbAdapter.Name = "cmbAdapter";
-            this.cmbAdapter.Size = new System.Drawing.Size(320, 23);
+            this.cmbAdapter.Size = new System.Drawing.Size(205, 23);
             this.cmbAdapter.TabIndex = 6;
 
             // btnStart
@@ -153,6 +155,15 @@ namespace WifiHotspot
             this.btnSave.Text = "保存设置";
             this.btnSave.UseVisualStyleBackColor = true;
             this.btnSave.Click += new System.EventHandler(this.btnSave_Click);
+
+            // btnProxy
+            this.btnProxy.Location = new System.Drawing.Point(330, 97);
+            this.btnProxy.Name = "btnProxy";
+            this.btnProxy.Size = new System.Drawing.Size(110, 23);
+            this.btnProxy.TabIndex = 11;
+            this.btnProxy.Text = "代理功能";
+            this.btnProxy.UseVisualStyleBackColor = true;
+            this.btnProxy.Click += new System.EventHandler(this.btnProxy_Click);
 
             // grpStatus
             this.grpStatus.Controls.Add(this.lblStatus);
@@ -250,6 +261,7 @@ namespace WifiHotspot
         private System.Windows.Forms.Button btnStop;
         private System.Windows.Forms.Button btnRefresh;
         private System.Windows.Forms.Button btnSave;
+        private System.Windows.Forms.Button btnProxy;
         private System.Windows.Forms.GroupBox grpStatus;
         private System.Windows.Forms.Label lblStatus;
         private System.Windows.Forms.GroupBox grpClients;

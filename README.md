@@ -24,7 +24,9 @@
 
 ## 功能
 
-- 一键创建 WiFi 热点（通过 `netsh wlan hostednetwork`）
+- 一键创建 WiFi 热点（优先 Windows 移动热点 API，失败回退 `netsh wlan hostednetwork`）
+- 自动诊断热点失败原因并给出可执行修改路径与设置入口
+- GUI 内置“代理功能”开关窗口，可编辑 HTTP Header/Captive/UDP/DNS/NTP/mDNS/DHCP 开关、设备指纹和随热点启停代理；未实现项在窗口内明确标注
 - 自动配置 ICS（Internet Connection Sharing）网络共享
 - 可自定义 SSID、密码（8-63 位 WPA2）
 - 选择用于共享上网的物理网卡
@@ -44,6 +46,11 @@ winx86-hotspot/
 │   ├── MainForm.resx            # 窗体资源
 │   ├── HotspotManager.cs        # 热点核心逻辑 (netsh)
 │   ├── IcsManager.cs            # ICS COM 接口 (HNetCfg.HNetShare)
+│   ├── MobileHotspotManager.cs  # Windows 移动热点 API (WinRT)
+│   ├── DiagnosisForm.cs         # 失败诊断与修复路径弹窗
+│   ├── ProxySettingsForm.cs     # 代理功能开关窗口
+│   ├── ProxyConfigManager.cs    # proxy/config.json 读写
+│   ├── ProxyProcessManager.cs   # hotspot-proxy.exe 启停
 │   ├── app.config               # .NET 运行时配置
 │   ├── app.manifest             # 管理员权限清单
 │   └── Properties/AssemblyInfo.cs
