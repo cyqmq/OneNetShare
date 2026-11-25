@@ -32,6 +32,7 @@ type TUNConfig struct {
 	UpstreamInterface string `json:"upstream_interface"`
 	PrefixLen         int    `json:"prefix_len"`
 	Route             *bool  `json:"route"`
+	TTL               int    `json:"ttl"`
 }
 
 type DeviceForgeConfig struct {
@@ -217,6 +218,9 @@ func (l *Loader) applyDefaults(cfg *Config) {
 	if cfg.TUN.PrefixLen <= 0 || cfg.TUN.PrefixLen > 32 {
 		cfg.TUN.PrefixLen = 24
 	}
+	if cfg.TUN.TTL <= 0 || cfg.TUN.TTL > 255 {
+		cfg.TUN.TTL = RecommendedTTL(cfg.DefaultProfile)
+	}
 	if cfg.DeviceForge.TargetOS == "" {
 		cfg.DeviceForge.TargetOS = "windows-11"
 	}
@@ -258,6 +262,14 @@ func (l *Loader) applyDefaults(cfg *Config) {
 			cfg.Rules[i].Domains = []string{"*"}
 		}
 	}
+}
+
+func RecommendedTTL(profile string) int {
+	name := strings.ToLower(profile)
+	if strings.Contains(name, "win") || strings.Contains(name, "windows") {
+		return 128
+	}
+	return 64
 }
 
 func MatchDomain(pattern, host string) bool {
@@ -304,7 +316,8 @@ func DefaultJSON() string {
     "gateway_ip": "10.66.0.2",
     "prefix_len": 24,
     "route": true,
-    "upstream_interface": ""
+    "upstream_interface": "",
+    "ttl": 128
   },
   "deviceforge": {
     "enabled": true,

@@ -26,7 +26,7 @@
 
 - 一键创建 WiFi 热点（优先 Windows 移动热点 API，失败回退 `netsh wlan hostednetwork`）
 - 自动诊断热点失败原因并给出可执行修改路径与设置入口
-- GUI 内置“代理功能”开关窗口，可编辑 HTTP Header/Captive/UDP/DNS/NTP/mDNS/DHCP 开关、设备指纹和随热点启停代理；未实现项在窗口内明确标注
+- GUI 内置“代理功能”开关窗口，可编辑 HTTP Header/Captive/UDP/DNS/NTP/mDNS/DHCP 开关、设备指纹和随热点启停代理；强制 TTL 随设备指纹自动填入推荐值（Windows 画像 128，Android/macOS/iOS/Linux 画像 64），手动改偏会提示；未实现项在窗口内明确标注
 - 网络层指纹归一化：基于 WinDivert 在 Windows 网卡出口强制重写 TTL/IPID、IPv6 Flow Label 与 TCP SYN 选项；需要 WinDivert.dll/驱动和管理员权限
 - Wintun 全局 TUN 接管：创建 `OneNetShare Tunnel` 虚拟网卡，接管 IPv4 默认路由/DNS，在用户态重建 UDP/DNS/NTP 会话并统一出口包指纹；需要官方 x86 `wintun.dll` 和管理员权限
 - 自动配置 ICS（Internet Connection Sharing）网络共享

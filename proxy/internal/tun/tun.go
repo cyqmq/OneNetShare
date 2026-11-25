@@ -64,6 +64,7 @@ type Device struct {
 	recentOutbound sync.Map
 	udpHandler     UDPHandler
 	ipid           uint16
+	ttl            byte
 	mu             sync.Mutex
 	closeOnce      sync.Once
 	wg             sync.WaitGroup
@@ -83,6 +84,7 @@ func New(tunName string, tunIP string, logger *log.Logger) (*Device, error) {
 		iface:  iface,
 		tunIP:  ip.To4(),
 		logger: logger,
+		ttl:    64,
 		quit:   make(chan struct{}),
 	}, nil
 }
@@ -92,6 +94,13 @@ func (d *Device) Name() string { return d.iface.Name() }
 func (d *Device) LocalIP() net.IP { return d.tunIP }
 
 func (d *Device) SetUDPHandler(h UDPHandler) { d.udpHandler = h }
+
+func (d *Device) SetTTL(ttl int) {
+	if ttl < 1 || ttl > 255 {
+		ttl = 64
+	}
+	d.ttl = byte(ttl)
+}
 
 func (d *Device) Close() {
 	d.closeOnce.Do(func() {
@@ -145,7 +154,7 @@ func (d *Device) sendPacket(dstIP net.IP, dstPort uint16, srcIP net.IP, srcPort 
 	binary.BigEndian.PutUint16(pkt[2:4], uint16(totalLen))
 	binary.BigEndian.PutUint16(pkt[4:6], d.nextIPID())
 	binary.BigEndian.PutUint16(pkt[6:8], 0x4000)
-	pkt[8] = 64
+	pkt[8] = d.ttl
 	pkt[9] = tcpProtocol
 	copy(pkt[12:16], srcIP.To4())
 	copy(pkt[16:20], dstIP.To4())
@@ -183,7 +192,7 @@ func (d *Device) SendUDP(srcIP net.IP, srcPort uint16, dstIP net.IP, dstPort uin
 	binary.BigEndian.PutUint16(pkt[2:4], uint16(totalLen))
 	binary.BigEndian.PutUint16(pkt[4:6], d.nextIPID())
 	binary.BigEndian.PutUint16(pkt[6:8], 0x4000)
-	pkt[8] = 64
+	pkt[8] = d.ttl
 	pkt[9] = udpProtocol
 	copy(pkt[12:16], srcIP.To4())
 	copy(pkt[16:20], dstIP.To4())

@@ -25,6 +25,8 @@ namespace WifiHotspot
         private readonly CheckBox chkTun;
         private readonly CheckBox chkTunRoute;
         private readonly NumericUpDown numTTL;
+        private readonly Label lblTtlHint;
+        private bool _updatingTtlFromProfile;
         private readonly NumericUpDown numPrefix;
         private readonly TextBox txtTunAdapter;
         private readonly TextBox txtTunIP;
@@ -50,7 +52,7 @@ namespace WifiHotspot
             var implemented = new GroupBox { Text = "已实现功能", Location = new Point(12, 12), Size = new Size(640, 415) };
             var missing = new GroupBox { Text = "未实现功能", Location = new Point(12, 427), Size = new Size(640, 130) };
             var note = new Label { Location = new Point(15, 370), Size = new Size(600, 38), ForeColor = Color.Gray };
-            note.Text = "Wintun 全局 TUN 接管开启后，UDP/DNS/NTP 经虚拟网卡进入代理；HTTP Header 仍需代理转发。TUN 与 WinDivert 网络层归一化互斥。";
+            note.Text = "Wintun 全局 TUN 接管开启后，UDP/DNS/NTP 经虚拟网卡进入代理；HTTP Header 仍需代理转发。TUN 与 WinDivert 网络层归一化互斥。TTL 会随设备指纹自动填入推荐值。";
 
             var lblMode = new Label { Location = new Point(15, 28), AutoSize = true, Text = "运行模式: forward (Windows)" };
             var lblProfile = new Label { Location = new Point(160, 28), AutoSize = true, Text = "默认设备指纹:" };
@@ -58,6 +60,7 @@ namespace WifiHotspot
             foreach (string profile in ProxyConfigManager.GetProfiles(_configPath)) cmbProfile.Items.Add(profile);
             if (!cmbProfile.Items.Contains(settings.Profile)) cmbProfile.Items.Add(settings.Profile);
             cmbProfile.SelectedItem = settings.Profile;
+            int initialTTL = ProxyConfigManager.RecommendedTTL(settings.Profile);
 
             chkEnabled = NewCheck("HTTP 代理与 Header 改写总开关", settings.Enabled, 15, 62);
             chkDeviceForge = NewCheck("设备伪装模块总开关", settings.DeviceForgeEnabled, 330, 62);
@@ -71,7 +74,8 @@ namespace WifiHotspot
             chkAutoStart = NewCheck("随热点自动启动/停止代理", settings.AutoStartProxy, 330, 182);
             chkNetwork = NewCheck("网络层指纹归一化 (WinDivert)", settings.NetworkEnabled, 15, 215);
             var lblTTL = new Label { Location = new Point(300, 218), AutoSize = true, Text = "强制 TTL:" };
-            numTTL = new NumericUpDown { Location = new Point(360, 215), Size = new Size(65, 23), Minimum = 1, Maximum = 255, Value = settings.NetworkTTL };
+            numTTL = new NumericUpDown { Location = new Point(360, 215), Size = new Size(65, 23), Minimum = 1, Maximum = 255, Value = initialTTL };
+            lblTtlHint = new Label { Location = new Point(435, 212), Size = new Size(190, 32), ForeColor = Color.DarkGreen };
             chkIPID = NewCheck("IPID 归一化", settings.NetworkIPID, 15, 245);
             chkTcpOptions = NewCheck("TCP SYN 选项归一化", settings.NetworkTCPOptions, 200, 245);
             chkForward = NewCheck("同时接管转发流量", settings.NetworkForward, 430, 245);
@@ -90,6 +94,9 @@ namespace WifiHotspot
 
             chkTun.CheckedChanged += delegate { chkNetwork.Enabled = !chkTun.Checked; };
             chkNetwork.Enabled = !settings.TunEnabled;
+            cmbProfile.SelectedIndexChanged += delegate { ApplyProfileTTL(); };
+            numTTL.ValueChanged += delegate { if (!_updatingTtlFromProfile) UpdateTtlHint(); };
+            UpdateTtlHint();
 
             implemented.Controls.Add(lblMode);
             implemented.Controls.Add(lblProfile);
@@ -107,6 +114,7 @@ namespace WifiHotspot
             implemented.Controls.Add(chkNetwork);
             implemented.Controls.Add(lblTTL);
             implemented.Controls.Add(numTTL);
+            implemented.Controls.Add(lblTtlHint);
             implemented.Controls.Add(chkIPID);
             implemented.Controls.Add(chkTcpOptions);
             implemented.Controls.Add(chkForward);
@@ -166,6 +174,31 @@ namespace WifiHotspot
             Controls.Add(missing);
             Controls.Add(lblResult);
             Controls.Add(panel);
+        }
+
+        private void ApplyProfileTTL()
+        {
+            string profile = cmbProfile.SelectedItem == null ? "chrome-win11" : cmbProfile.SelectedItem.ToString();
+            _updatingTtlFromProfile = true;
+            numTTL.Value = ProxyConfigManager.RecommendedTTL(profile);
+            _updatingTtlFromProfile = false;
+            UpdateTtlHint();
+        }
+
+        private void UpdateTtlHint()
+        {
+            string profile = cmbProfile.SelectedItem == null ? "chrome-win11" : cmbProfile.SelectedItem.ToString();
+            int recommended = ProxyConfigManager.RecommendedTTL(profile);
+            if ((int)numTTL.Value == recommended)
+            {
+                lblTtlHint.ForeColor = Color.DarkGreen;
+                lblTtlHint.Text = profile + " 推荐 TTL=" + recommended + "，已自动填入";
+            }
+            else
+            {
+                lblTtlHint.ForeColor = Color.DarkOrange;
+                lblTtlHint.Text = "注意：与 " + profile + " 推荐 TTL=" + recommended + " 不一致，可能暴露系统指纹";
+            }
         }
 
         private static CheckBox NewCheck(string text, bool checkedValue, int x, int y)

@@ -7,7 +7,7 @@
   "auto_reload": true,
   "network": {
     "enabled": false,
-    "ttl": 64,
+    "ttl": 128,
     "ipid": true,
     "tcp_options": true,
     "forward": true
@@ -19,7 +19,8 @@
     "gateway_ip": "10.66.0.2",
     "prefix_len": 24,
     "route": true,
-    "upstream_interface": ""
+    "upstream_interface": "",
+    "ttl": 128
   },
   "log": {
     "level": "info",

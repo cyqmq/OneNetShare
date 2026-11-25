@@ -68,6 +68,7 @@ func main() {
 		if err != nil {
 			logger.Fatalf("TUN 初始化失败: %v", err)
 		}
+		tunDev.SetTTL(cfg.TUN.TTL)
 		route := true
 		if cfg.TUN.Route != nil {
 			route = *cfg.TUN.Route

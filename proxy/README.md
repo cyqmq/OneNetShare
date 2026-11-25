@@ -119,7 +119,8 @@ GOOS=windows GOARCH=386 CGO_ENABLED=0 go build -o build/hotspot-proxy-win-x86.ex
     "gateway_ip": "10.66.0.2",
     "prefix_len": 24,
     "route": true,
-    "upstream_interface": ""
+    "upstream_interface": "",
+    "ttl": 128
   },
    "default_profile": "chrome-win11",
    "deviceforge": {
@@ -163,7 +164,7 @@ GOOS=windows GOARCH=386 CGO_ENABLED=0 go build -o build/hotspot-proxy-win-x86.ex
 }
 ```
 
-Windows 下 `tun.enabled=true` 使用 Wintun 全局接管：需把官方 x86 `wintun.dll` 放在 `hotspot-proxy.exe` 同目录并以管理员运行。`upstream_interface` 留空时自动读取 IPv4 默认路由对应的物理网卡；代理上游 TCP/UDP 会绑定到该网卡，避免流量重新进入 TUN。退出时通过 `GET /shutdown` 或直接信号恢复路由。
+Windows 下 `tun.enabled=true` 使用 Wintun 全局接管：需把官方 x86 `wintun.dll` 放在 `hotspot-proxy.exe` 同目录并以管理员运行。`upstream_interface` 留空时自动读取 IPv4 默认路由对应的物理网卡；代理上游 TCP/UDP 会绑定到该网卡，避免流量重新进入 TUN。退出时通过 `GET /shutdown` 或直接信号恢复路由。`tun.ttl` 与 GUI 的“强制 TTL”共用：Windows 画像推荐 128，Android/macOS/iOS/Linux 画像推荐 64，GUI 切换画像时会自动填入并显示防呆提示。
 
 内置画像名：`chrome-win11`, `chrome-win10`, `edge-win11`, `chrome-android`, `safari-ios`, `safari-macos`, `firefox-win11`, `curl-linux`。
 

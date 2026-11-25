@@ -58,6 +58,7 @@ namespace WifiHotspot
             IDictionary<string, object> captive = GetDict(deviceforge, "captive");
             IDictionary<string, object> network = GetDict(root, "network");
             IDictionary<string, object> tun = GetDict(root, "tun");
+            string profile = GetString(root, "default_profile", "chrome-win11");
 
             return new ProxySettings
             {
@@ -72,7 +73,7 @@ namespace WifiHotspot
                 Captive = GetBool(captive, "enabled", true),
                 AutoStartProxy = GetBool(root, "gui_auto_start_proxy", true),
                 NetworkEnabled = GetBool(network, "enabled", false),
-                NetworkTTL = GetInt(network, "ttl", 64),
+                NetworkTTL = GetInt(network, "ttl", RecommendedTTL(profile)),
                 NetworkIPID = GetBool(network, "ipid", true),
                 NetworkTCPOptions = GetBool(network, "tcp_options", true),
                 NetworkForward = GetBool(network, "forward", true),
@@ -84,7 +85,7 @@ namespace WifiHotspot
                 TunRoute = GetBool(tun, "route", true),
                 TunUpstreamInterface = GetString(tun, "upstream_interface", ""),
                 Mode = GetString(root, "mode", "forward"),
-                Profile = GetString(root, "default_profile", "chrome-win11")
+                Profile = profile
             };
         }
 
@@ -107,6 +108,12 @@ namespace WifiHotspot
             }
             catch { }
             return profiles;
+        }
+
+        public static int RecommendedTTL(string profile)
+        {
+            string name = (profile ?? string.Empty).ToLowerInvariant();
+            return name.Contains("win") || name.Contains("windows") ? 128 : 64;
         }
 
         public static void Save(ProxySettings settings, string path = null)
@@ -139,6 +146,7 @@ namespace WifiHotspot
             SetInt(tun, "prefix_len", settings.TunPrefixLen <= 0 ? 24 : settings.TunPrefixLen);
             SetBool(tun, "route", settings.TunRoute);
             SetString(tun, "upstream_interface", settings.TunUpstreamInterface ?? string.Empty);
+            SetInt(tun, "ttl", settings.NetworkTTL);
 
             SetBool(deviceforge, "enabled", settings.DeviceForgeEnabled);
             SetBool(deviceforge, "headers", settings.Headers);
@@ -217,8 +225,8 @@ namespace WifiHotspot
   ""default_profile"": ""chrome-win11"",
   ""auto_reload"": true,
   ""gui_auto_start_proxy"": true,
-  ""network"": { ""enabled"": false, ""ttl"": 64, ""ipid"": true, ""tcp_options"": true, ""forward"": true },
-  ""tun"": { ""enabled"": false, ""name"": ""OneNetShare Tunnel"", ""ip"": ""10.66.0.1"", ""gateway_ip"": ""10.66.0.2"", ""prefix_len"": 24, ""route"": true, ""upstream_interface"": """" },
+  ""network"": { ""enabled"": false, ""ttl"": 128, ""ipid"": true, ""tcp_options"": true, ""forward"": true },
+  ""tun"": { ""enabled"": false, ""name"": ""OneNetShare Tunnel"", ""ip"": ""10.66.0.1"", ""gateway_ip"": ""10.66.0.2"", ""prefix_len"": 24, ""route"": true, ""upstream_interface"": """", ""ttl"": 128 },
   ""log"": { ""level"": ""info"", ""file"": "" },
   ""deviceforge"": {
     ""enabled"": true,
