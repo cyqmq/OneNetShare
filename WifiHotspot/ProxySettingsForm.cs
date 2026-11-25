@@ -44,6 +44,9 @@ namespace WifiHotspot
         private readonly ComboBox cmbProfile;
         private readonly ComboBox cmbUaPreset;
         private readonly ComboBox cmbIpv6Policy;
+        private readonly CheckBox chkPortalBlock;
+        private readonly TextBox txtPortalPrimary;
+        private readonly TextBox txtPortalSecondary;
         private readonly TextBox txtProbeLog;
         private readonly System.Windows.Forms.Timer probeTimer;
         private long _probeLogOffset;
@@ -63,10 +66,10 @@ namespace WifiHotspot
             ClientSize = new Size(680, 760);
             Font = new Font("Microsoft YaHei", 9F, FontStyle.Regular, GraphicsUnit.Point, 134);
 
-            var content = new Panel { Dock = DockStyle.Fill, AutoScroll = true, AutoScrollMinSize = new Size(0, 900) };
-            var implemented = new GroupBox { Text = "已实现功能", Location = new Point(12, 12), Size = new Size(640, 480) };
-            var missing = new GroupBox { Text = "未实现功能", Location = new Point(12, 500), Size = new Size(640, 100) };
-            var note = new Label { Location = new Point(15, 447), Size = new Size(600, 30), ForeColor = Color.Gray };
+            var content = new Panel { Dock = DockStyle.Fill, AutoScroll = true, AutoScrollMinSize = new Size(0, 940) };
+            var implemented = new GroupBox { Text = "已实现功能", Location = new Point(12, 12), Size = new Size(640, 520) };
+            var missing = new GroupBox { Text = "未实现功能", Location = new Point(12, 540), Size = new Size(640, 100) };
+            var note = new Label { Location = new Point(15, 487), Size = new Size(600, 30), ForeColor = Color.Gray };
             note.Text = "Wintun 全局 TUN 接管开启后，UDP/DNS/NTP 经虚拟网卡进入代理；HTTP Header 仍需代理转发。TUN 与 WinDivert 网络层归一化互斥。TTL 会随设备指纹自动填入推荐值。";
 
             var lblMode = new Label { Location = new Point(15, 28), AutoSize = true, Text = "运行模式: forward (Windows)" };
@@ -132,6 +135,11 @@ namespace WifiHotspot
             cmbIpv6Policy.ValueMember = "Key";
             cmbIpv6Policy.SelectedValue = ipv6Policies.ContainsKey(settings.IPv6Policy) ? settings.IPv6Policy : "block";
             var lblIPv6Hint = new Label { Location = new Point(550, 420), Size = new Size(85, 32), ForeColor = Color.DarkRed, Text = "IPv6 无 NAT，默认封禁转发" };
+            chkPortalBlock = NewCheck("封堵认证门户主/备 IP（禁手机后台弹窗）", settings.PortalBlockEnabled, 15, 450);
+            var lblPortalPrimary = new Label { Location = new Point(300, 453), AutoSize = true, Text = "主IP:" };
+            txtPortalPrimary = NewText(settings.PortalPrimaryIP, 340, 450, 110);
+            var lblPortalSecondary = new Label { Location = new Point(460, 453), AutoSize = true, Text = "备IP:" };
+            txtPortalSecondary = NewText(settings.PortalSecondaryIP, 500, 450, 120);
 
             chkTun.CheckedChanged += delegate { chkNetwork.Enabled = !chkTun.Checked; };
             chkNetwork.Enabled = !settings.TunEnabled;
@@ -182,6 +190,11 @@ namespace WifiHotspot
             implemented.Controls.Add(lblIPv6Policy);
             implemented.Controls.Add(cmbIpv6Policy);
             implemented.Controls.Add(lblIPv6Hint);
+            implemented.Controls.Add(chkPortalBlock);
+            implemented.Controls.Add(lblPortalPrimary);
+            implemented.Controls.Add(txtPortalPrimary);
+            implemented.Controls.Add(lblPortalSecondary);
+            implemented.Controls.Add(txtPortalSecondary);
             implemented.Controls.Add(note);
 
             var chkWebRtc = NewCheck("WebRTC 本地 IP 防泄漏（未实现）", false, 15, 18);
@@ -197,7 +210,7 @@ namespace WifiHotspot
             missing.Controls.Add(chkTls);
             missing.Controls.Add(missingNote);
 
-            var grpProbe = new GroupBox { Text = "探针日志 / 连通性测试", Location = new Point(12, 603), Size = new Size(640, 250) };
+            var grpProbe = new GroupBox { Text = "探针日志 / 连通性测试", Location = new Point(12, 643), Size = new Size(640, 250) };
             txtProbeLog = new TextBox { Multiline = true, ReadOnly = true, Dock = DockStyle.Fill, ScrollBars = ScrollBars.Vertical, BackColor = Color.White, Font = new Font("Consolas", 9F) };
             var probePanel = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 44, FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(6, 6, 6, 6) };
             var btnTest = NewButton("一键连通性测试", 150);
@@ -212,11 +225,12 @@ namespace WifiHotspot
             grpProbe.Controls.Add(txtProbeLog);
             grpProbe.Controls.Add(probePanel);
 
-            lblResult = new Label { Location = new Point(12, 860), Size = new Size(640, 30), ForeColor = Color.DarkGreen };
+            lblResult = new Label { Location = new Point(12, 900), Size = new Size(640, 30), ForeColor = Color.DarkGreen };
             lblResult.Text = (ProxyProcessManager.IsRunning() ? "代理运行" : "代理未运行") +
                              "；Wintun.dll " + (HotspotManager.WintunAvailable() ? "存在" : "缺失") +
                              "；网络层归一化 " + (NetworkNormalizer.Shared.IsRunning ? "运行" : "未运行（" + NetworkNormalizer.Shared.LastMessage + "）") +
-                             "；IPv6 转发封禁 " + (IPv6Guard.IsRunning ? "运行" : (IPv6Guard.IsEnabled(settings.IPv6Policy) ? "未运行" : "未启用"));
+                             "；IPv6 " + (IPv6Guard.IsRunning ? "运行" : (IPv6Guard.IsEnabled(settings.IPv6Policy) ? "未运行" : "未启用")) +
+                             "；Portal " + (PortalGuard.IsRunning ? "运行" : "未运行");
 
             var panel = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 48, FlowDirection = FlowDirection.RightToLeft, WrapContents = false, Padding = new Padding(8, 8, 8, 8) };
             var btnClose = NewButton("关闭");
@@ -672,7 +686,10 @@ namespace WifiHotspot
                 Profile = cmbProfile.SelectedItem == null ? "chrome-win11" : cmbProfile.SelectedItem.ToString(),
                 UAPreset = cmbUaPreset.SelectedValue == null ? "" : cmbUaPreset.SelectedValue.ToString(),
                 UserAgentOverride = "",
-                IPv6Policy = cmbIpv6Policy.SelectedValue == null ? "block" : cmbIpv6Policy.SelectedValue.ToString()
+                IPv6Policy = cmbIpv6Policy.SelectedValue == null ? "block" : cmbIpv6Policy.SelectedValue.ToString(),
+                PortalBlockEnabled = chkPortalBlock.Checked,
+                PortalPrimaryIP = txtPortalPrimary.Text.Trim(),
+                PortalSecondaryIP = txtPortalSecondary.Text.Trim()
             };
         }
 

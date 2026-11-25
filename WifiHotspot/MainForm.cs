@@ -224,6 +224,13 @@ namespace WifiHotspot
                         if (!ipv6Result.Success)
                             ShowHotspotDiagnosis("IPv6 转发封禁启动失败：\n" + ipv6Result.Message, selected);
                     }
+                    if (settings.PortalBlockEnabled)
+                    {
+                        var portalResult = PortalGuard.Start(settings.PortalPrimaryIP, settings.PortalSecondaryIP);
+                        proxyMessage += "\n" + portalResult.Message;
+                        if (!portalResult.Success)
+                            ShowHotspotDiagnosis("Portal 封堵启动失败：\n" + portalResult.Message, selected);
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -254,6 +261,7 @@ namespace WifiHotspot
                     if (settings.AutoStartProxy)
                         proxyMessage = "\n" + ProxyProcessManager.Stop();
                     proxyMessage += "\n" + IPv6Guard.Stop().Message;
+                    proxyMessage += "\n" + PortalGuard.Stop().Message;
                 }
                 catch { }
                 MessageBox.Show(result.Message + proxyMessage, "停止结果", MessageBoxButtons.OK, MessageBoxIcon.Information);

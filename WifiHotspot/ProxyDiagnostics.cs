@@ -21,6 +21,7 @@ namespace WifiHotspot
 
             AnalyzeConfig(configPath, lines);
             AnalyzeIPv6(configPath, lines);
+            AnalyzePortal(configPath, lines);
             AnalyzePorts(configPath, lines);
             AnalyzeLog(processOutput, lines);
             return string.Join("\n", lines.ToArray());
@@ -125,6 +126,38 @@ namespace WifiHotspot
             lines.Add("IPv6 策略: " + policy + "；" + CheckIPv6Safety());
             if (IPv6Guard.IsEnabled(policy) && !IPv6Guard.IsRunning)
                 lines.Add("[警告] 配置要求封禁 IPv6 转发，但 WinDivert 封禁当前未运行；热点启动后才会生效。");
+        }
+
+        private static void AnalyzePortal(string configPath, List<string> lines)
+        {
+            string path = string.IsNullOrEmpty(configPath) ? ProxyConfigManager.DefaultConfigPath : configPath;
+            bool enabled = false;
+            string primary = "";
+            string secondary = "";
+            if (File.Exists(path))
+            {
+                try
+                {
+                    object parsed = new JavaScriptSerializer().DeserializeObject(File.ReadAllText(path, Encoding.UTF8));
+                    IDictionary<string, object> root = parsed as IDictionary<string, object>;
+                    if (root != null)
+                    {
+                        enabled = GetBool(root, "portal_block_enabled", false);
+                        primary = GetString(root, "portal_primary_ip", "");
+                        secondary = GetString(root, "portal_secondary_ip", "");
+                    }
+                }
+                catch { }
+            }
+
+            List<string> ips = PortalGuard.ParseIPs(primary, secondary);
+            lines.Add("Portal 封堵: " + (enabled ? "已启用" : "未启用") +
+                      (ips.Count > 0 ? "；IP=" + string.Join(",", ips.ToArray()) : "；未配置 IP") +
+                      "；" + (PortalGuard.IsRunning ? "运行中" : "未运行"));
+            if (enabled && ips.Count == 0)
+                lines.Add("[警告] 已启用 Portal 封堵，但主/备 IP 为空；请填写认证网关主 IP 和第二个 IP。");
+            if (enabled && ips.Count > 0 && !PortalGuard.IsRunning)
+                lines.Add("[警告] Portal 封堵已配置但未运行；启动热点后会在 WinDivert FORWARD 层丢弃到这些 IP 的转发包。");
         }
 
         public static string CheckIPv6Safety()

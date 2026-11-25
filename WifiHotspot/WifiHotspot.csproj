@@ -67,6 +67,7 @@
     <Compile Include="ProxyProcessManager.cs" />
     <Compile Include="NetworkNormalizer.cs" />
     <Compile Include="IPv6Guard.cs" />
+    <Compile Include="PortalGuard.cs" />
     <Compile Include="ProxySettingsForm.cs">
       <SubType>Form</SubType>
     </Compile>
