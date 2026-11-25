@@ -1,0 +1,11 @@
+# OpenWrt fw4 nftables include 片段
+# 放入 /etc/nftables.d/50-ttl-normalize.nft 后执行: fw4 check && fw4 reload
+# TTL 值在此修改（默认 64）；如需限定 WAN，取消注释 oifname 行并替换接口名。
+
+chain ttl_normalize_postrouting {
+    type filter hook postrouting priority 300 ; policy accept ;
+    # oifname "eth0" counter ip ttl set 64
+    # oifname "eth0" counter ip6 hoplimit set 64
+    counter ip ttl set 64
+    counter ip6 hoplimit set 64
+}

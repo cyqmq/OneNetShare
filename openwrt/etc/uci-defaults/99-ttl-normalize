@@ -1,0 +1,17 @@
+#!/bin/sh
+# UCI 默认配置：首次启动时写入 ttl-normalize 配置（可按需修改后再应用）
+# 部署位置: /etc/uci-defaults/99-ttl-normalize
+
+uci -q batch <<EOF
+delete ttl-normalize
+add ttl-normalize settings
+set ttl-normalize.@settings[0].enabled='1'
+set ttl-normalize.@settings[0].ttl='64'
+set ttl-normalize.@settings[0].wan_iface=''
+commit ttl-normalize
+EOF
+
+# 如系统存在 ttl-normalize.sh，则立即应用一次
+[ -x /usr/bin/ttl-normalize.sh ] && /usr/bin/ttl-normalize.sh start >/dev/null 2>&1
+
+exit 0

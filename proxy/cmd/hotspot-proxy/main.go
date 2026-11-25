@@ -1,0 +1,177 @@
+package main
+
+import (
+	"flag"
+	"fmt"
+	"io"
+	"log"
+	"net"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"hotspot-proxy/internal/config"
+	"hotspot-proxy/internal/deviceforge"
+	"hotspot-proxy/internal/proxy"
+	"hotspot-proxy/internal/tun"
+	"hotspot-proxy/internal/version"
+)
+
+func main() {
+	showVersion := flag.Bool("version", false, "显示版本")
+	configPath := flag.String("config", "", "配置文件路径")
+	dumpConfig := flag.Bool("dump-config", false, "输出默认配置模板到 stdout")
+	flag.Parse()
+
+	if *showVersion {
+		fmt.Println(version.String())
+		return
+	}
+	if *dumpConfig {
+		fmt.Print(config.DefaultJSON())
+		return
+	}
+
+	path := config.ResolveConfigPath(*configPath)
+	var logger *log.Logger
+	cfg0, err := config.LoadRaw(path)
+	if err == nil && cfg0.Log.File != "" {
+		f, ferr := os.OpenFile(cfg0.Log.File, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+		if ferr == nil {
+			defer f.Close()
+			logger = log.New(f, "", log.LstdFlags)
+		}
+	}
+	if logger == nil {
+		logger = log.New(os.Stderr, "", log.LstdFlags)
+	}
+
+	var forge *deviceforge.Manager
+	loader, err := config.NewLoader(path, func(c *config.Config) {
+		logger.Printf("配置已加载: mode=%s enabled=%v rules=%d", c.Mode, c.Enabled, len(c.Rules))
+		if forge != nil {
+			forge.Reload(c)
+		}
+	})
+	if err != nil {
+		logger.Fatalf("配置错误: %v", err)
+	}
+	forge = deviceforge.NewManager(loader, logger)
+
+	cfg := loader.Get()
+
+	if cfg.TUN.Enabled {
+		if cfg.TUN.Name == "" {
+			cfg.TUN.Name = "tun0"
+		}
+		if cfg.TUN.IP == "" {
+			cfg.TUN.IP = "10.66.0.1"
+		}
+		tunDev, err := tun.New(cfg.TUN.Name, cfg.TUN.IP, logger)
+		if err != nil {
+			logger.Fatalf("TUN 初始化失败: %v", err)
+		}
+		if err := tun.SetupTUN(cfg.TUN.Name, cfg.TUN.IP, "24"); err != nil {
+			logger.Printf("TUN 接口配置: %v", err)
+		}
+		tunDev.StartCleanup()
+		if cfg.DeviceForge.Enabled {
+			tunDev.SetUDPHandler(func(srcIP net.IP, srcPort uint16, dstIP net.IP, dstPort uint16, payload []byte) {
+				forge.HandleUDP(srcIP, srcPort, dstIP, dstPort, payload, tunDev)
+			})
+			forge.Reload(cfg)
+		}
+		go func() {
+			if err := tunDev.Run(); err != nil {
+				logger.Printf("TUN 运行错误: %v", err)
+			}
+		}()
+		logger.Printf("TUN 模式运行: %s (%s)", tunDev.Name(), cfg.TUN.IP)
+		select {}
+	}
+
+	if cfg.DeviceForge.Enabled && cfg.DeviceForge.UDP.Enabled {
+		if err := forge.StartUDP(cfg.Mode); err != nil {
+			logger.Printf("DeviceForge UDP 启动失败: %v", err)
+		}
+	}
+
+	srv := proxy.NewServer(loader, logger)
+
+	if cfg.Mode == "forward" && cfg.ListenHTTPS == "" {
+		cfg.ListenHTTPS = "127.0.0.1:18443"
+	}
+
+	if cfg.Mode != "forward" {
+		if err := srv.ListenHTTPS(cfg.ListenHTTPS); err != nil {
+			logger.Fatal(err)
+		}
+	}
+	go func() {
+		if err := srv.Run(cfg.ListenHTTP); err != nil {
+			logger.Fatal(err)
+		}
+	}()
+
+	go startReloadWatcher(loader, logger)
+	go startStatusServer(loader, logger)
+
+	logger.Printf("%s 启动完成 (http=%s https=%s mode=%s)",
+		version.String(), cfg.ListenHTTP, cfg.ListenHTTPS, cfg.Mode)
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+	for {
+		sig := <-sigCh
+		if sig == syscall.SIGHUP {
+			if err := loader.Reload(); err != nil {
+				logger.Printf("reload 失败: %v", err)
+			}
+			continue
+		}
+		logger.Printf("收到 %v，退出", sig)
+		srv.Close()
+		return
+	}
+}
+
+func startReloadWatcher(loader *config.Loader, logger *log.Logger) {
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	for range ticker.C {
+		changed, err := loader.ReloadIfChanged()
+		if err != nil {
+			continue
+		}
+		if changed {
+			logger.Println("检测到配置文件变更，已热重载")
+		}
+	}
+}
+
+func startStatusServer(loader *config.Loader, logger *log.Logger) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/status", func(w http.ResponseWriter, r *http.Request) {
+		cfg := loader.Get()
+		fmt.Fprintf(w, "mode=%s enabled=%v profile=%s rules=%d\n",
+			cfg.Mode, cfg.Enabled, cfg.DefaultProfile, len(cfg.Rules))
+		fmt.Fprintf(w, "deviceforge=%v target=%s udp=%v dns=%v ntp=%v mdns=%v dhcp=%v captive=%v/%s headers=%v\n",
+			cfg.DeviceForge.Enabled, cfg.DeviceForge.TargetOS, cfg.DeviceForge.UDP.Enabled,
+			cfg.DeviceForge.DNS.Enabled, cfg.DeviceForge.NTP.Enabled,
+			cfg.DeviceForge.MDNS.Enabled, cfg.DeviceForge.DHCP.Enabled,
+			cfg.DeviceForge.Captive.Enabled, cfg.DeviceForge.Captive.Mode, cfg.DeviceForge.Headers)
+	})
+	mux.HandleFunc("/reload", func(w http.ResponseWriter, r *http.Request) {
+		if err := loader.Reload(); err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		io.WriteString(w, "ok\n")
+	})
+	srv := &http.Server{Addr: "127.0.0.1:18089", Handler: mux, ReadHeaderTimeout: 5 * time.Second}
+	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		logger.Printf("状态服务: %v", err)
+	}
+}

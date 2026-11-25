@@ -1,0 +1,113 @@
+{
+  "enabled": true,
+  "mode": "redirect",
+  "listen_http": "0.0.0.0:18080",
+  "listen_https": "0.0.0.0:18443",
+  "default_profile": "chrome-win11",
+  "auto_reload": true,
+  "log": {
+    "level": "info",
+    "file": ""
+  },
+  "deviceforge": {
+    "enabled": true,
+    "target_os": "windows-11",
+    "headers": true,
+    "udp": {
+      "enabled": true,
+      "listen": "0.0.0.0:18500",
+      "all_ports": true,
+      "target_ports": [53, 123, 443, 5353],
+      "listen_ports": {
+        "53": 18053,
+        "123": 18123,
+        "443": 18443,
+        "5353": 23353
+      }
+    },
+    "dns": {
+      "enabled": true,
+      "strip_edns": true,
+      "force_tcp": false,
+      "min_ttl": 60,
+      "max_ttl": 86400
+    },
+    "ntp": {
+      "enabled": true,
+      "server": "pool.ntp.org",
+      "rewrite_refid": true
+    },
+    "mdns": {
+      "enabled": true,
+      "hostname": "gateway",
+      "service": "_workstation._tcp.local"
+    },
+    "dhcp": {
+      "enabled": true,
+      "vendor_class": "MSFT 5.0",
+      "client_id": ""
+    },
+    "captive": {
+      "enabled": true,
+      "mode": "reply",
+      "domains": ["captive.apple.com", "www.msftconnecttest.com", "connectivitycheck.gstatic.com", "detectportal.firefox.com", "www.google.com"],
+      "dns_domains": ["captive.apple.com", "www.msftconnecttest.com", "connectivitycheck.gstatic.com", "detectportal.firefox.com", "nmcheck.gnome.org"],
+      "paths": ["/generate_204", "/connecttest.txt", "/hotspot-detect.html", "/success.txt", "/nmcheck"],
+      "reply_ip": "",
+      "ttl": 60,
+      "http_code": 204,
+      "http_body": ""
+    }
+  },
+  "profiles": {
+    "corp-windows": {
+      "description": "企业办公 Windows 11 / Chrome",
+      "headers": {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+        "sec-ch-ua-platform": "\"Windows\""
+      }
+    },
+    "mobile-android": {
+      "description": "Android 14 / Chrome Mobile",
+      "headers": {
+        "User-Agent": "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36",
+        "sec-ch-ua-mobile": "?1",
+        "sec-ch-ua-platform": "\"Android\""
+      }
+    }
+  },
+  "rules": [
+    {
+      "name": "default-all",
+      "enabled": true,
+      "domains": ["*"],
+      "profile": "chrome-win11",
+      "set_headers": {},
+      "remove_headers": ["X-Forwarded-For", "X-Real-IP", "Via"],
+      "add_headers": {}
+    },
+    {
+      "name": "api-domain",
+      "enabled": true,
+      "domains": ["*.example.com", "example.com"],
+      "profile": "corp-windows",
+      "set_headers": {
+        "Referer": "https://www.google.com/",
+        "Origin": "https://example.com"
+      },
+      "remove_headers": [],
+      "add_headers": {}
+    },
+    {
+      "name": "mobile-subdomain",
+      "enabled": true,
+      "domains": ["m.example.com"],
+      "path_prefix": "/api",
+      "profile": "mobile-android",
+      "set_headers": {},
+      "remove_headers": [],
+      "add_headers": {}
+    }
+  ]
+}

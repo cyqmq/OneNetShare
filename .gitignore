@@ -1,0 +1,13 @@
+proxy/build/
+**/bin/
+**/obj/
+*.exe
+*.dll
+*.pdb
+*.user
+*.suo
+*.log
+*.bak
+config.ini
+.vs/
+.DS_Store

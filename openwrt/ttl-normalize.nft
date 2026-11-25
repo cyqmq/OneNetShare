@@ -1,0 +1,12 @@
+#!/usr/sbin/nft -f
+# 独立 nftables 规则集（不依赖 fw4，直接用 nft -f 加载）
+# 如需修改 TTL，编辑下方两个 set 值。
+
+table inet ttl_normalize {
+    chain postrouting {
+        type filter hook postrouting priority mangle ; policy accept ;
+        # 限定 WAN 示例: oifname "eth0" ip ttl set 64
+        ip ttl set 64
+        ip6 hoplimit set 64
+    }
+}
