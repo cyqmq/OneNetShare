@@ -162,6 +162,11 @@ namespace WifiHotspot
                 form.ShowDialog(this);
         }
 
+        private void ShowProxyDiagnosis(string message)
+        {
+            MessageBox.Show(this, message, "代理自动诊断", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+
         private void RefreshClients()
         {
             lstClients.Items.Clear();
@@ -207,7 +212,9 @@ namespace WifiHotspot
                     if (settings.AutoStartProxy)
                     {
                         proxyMessage = "\n" + ProxyProcessManager.Start(ProxyConfigManager.DefaultConfigPath);
-                        if (settings.TunEnabled && !ProxyProcessManager.IsRunning())
+                        if (!ProxyProcessManager.IsRunning() && !string.IsNullOrEmpty(ProxyProcessManager.LastDiagnostic))
+                            ShowProxyDiagnosis("热点启动后代理未就绪。\n" + ProxyProcessManager.LastDiagnostic);
+                        else if (settings.TunEnabled && !ProxyProcessManager.IsRunning())
                             ShowHotspotDiagnosis("全局 TUN 代理启动失败：\n" + proxyMessage, selected);
                     }
                 }

@@ -174,9 +174,12 @@ namespace WifiHotspot
             var probePanel = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 44, FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(6, 6, 6, 6) };
             var btnTest = NewButton("一键连通性测试", 150);
             btnTest.Click += RunConnectivityTest;
+            var btnDiagnose = NewButton("自动诊断", 108);
+            btnDiagnose.Click += RunDiagnosis;
             var btnClearLog = NewButton("清空日志", 108);
             btnClearLog.Click += delegate { txtProbeLog.Clear(); _probeLogOffset = File.Exists(ProxyProcessManager.ProbeLogPath) ? new FileInfo(ProxyProcessManager.ProbeLogPath).Length : 0; };
             probePanel.Controls.Add(btnClearLog);
+            probePanel.Controls.Add(btnDiagnose);
             probePanel.Controls.Add(btnTest);
             grpProbe.Controls.Add(txtProbeLog);
             grpProbe.Controls.Add(probePanel);
@@ -583,13 +586,38 @@ namespace WifiHotspot
         {
             ProxySettings settings = Collect();
             ProxyConfigManager.Save(settings, _configPath);
-            lblResult.Text = (ProxyProcessManager.IsRunning() ? ProxyProcessManager.Stop() + "；" + ProxyProcessManager.Start(_configPath) : ProxyProcessManager.Start(_configPath)) +
-                             "；" + ApplyNetwork(settings) + TuneWarning(settings);
+            string result = ProxyProcessManager.IsRunning() ? ProxyProcessManager.Stop() + "；" + ProxyProcessManager.Start(_configPath) : ProxyProcessManager.Start(_configPath);
+            lblResult.Text = result + "；" + ApplyNetwork(settings) + TuneWarning(settings);
+            ShowProxyDiagnosticIfNeeded();
         }
 
         private void ToggleProxy(object sender, EventArgs e)
         {
-            lblResult.Text = ProxyProcessManager.IsRunning() ? ProxyProcessManager.Stop() : ProxyProcessManager.Start(_configPath) + TuneWarning(Collect());
+            string result;
+            if (ProxyProcessManager.IsRunning())
+            {
+                result = ProxyProcessManager.Stop();
+            }
+            else
+            {
+                result = ProxyProcessManager.Start(_configPath) + TuneWarning(Collect());
+                ShowProxyDiagnosticIfNeeded();
+            }
+            lblResult.Text = result;
+        }
+
+        private void RunDiagnosis(object sender, EventArgs e)
+        {
+            string text = ProxyDiagnostics.Analyze(_configPath, ProxyProcessManager.GetProcessOutput(), null);
+            ProxyProcessManager.LastDiagnostic = text;
+            lblResult.Text = "自动诊断已生成，详见弹窗。";
+            MessageBox.Show(this, text, "代理自动诊断", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+
+        private void ShowProxyDiagnosticIfNeeded()
+        {
+            if (string.IsNullOrEmpty(ProxyProcessManager.LastDiagnostic)) return;
+            MessageBox.Show(this, ProxyProcessManager.LastDiagnostic, "代理自动诊断", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
 
         private void ToggleNetwork(object sender, EventArgs e)

@@ -236,4 +236,4 @@ curl http://127.0.0.1:18089/reload    # 两者
 
 - 透明模式无法上网：确认 iptables REDIRECT 规则已安装、LAN 网段正确；检查 `log.file` 日志
 - Header 未改写：确认 `enabled=true`、规则 `domains` 匹配；注意 HTTPS 请求无法改写（盲转发设计如此）
-- 端口冲突：修改 `listen_http` / `listen_https`
+- 端口冲突：修改 `listen_http` / `listen_https`。Windows GUI 启动代理失败时会自动生成诊断报告，涵盖配置解析、HTTP/HTTPS/状态/UDP 端口占用、Windows 保留端口范围、退出码、进程输出与 `probe.log`；也可在“代理功能 → 探针日志 / 连通性测试”点击“自动诊断”。
