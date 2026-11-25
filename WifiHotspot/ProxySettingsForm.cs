@@ -42,6 +42,7 @@ namespace WifiHotspot
         private readonly TextBox txtTunGateway;
         private readonly ComboBox cmbTunUpstream;
         private readonly ComboBox cmbProfile;
+        private readonly TextBox txtUserAgent;
         private readonly TextBox txtProbeLog;
         private readonly System.Windows.Forms.Timer probeTimer;
         private long _probeLogOffset;
@@ -62,9 +63,9 @@ namespace WifiHotspot
             Font = new Font("Microsoft YaHei", 9F, FontStyle.Regular, GraphicsUnit.Point, 134);
 
             var content = new Panel { Dock = DockStyle.Fill, AutoScroll = true, AutoScrollMinSize = new Size(0, 880) };
-            var implemented = new GroupBox { Text = "已实现功能", Location = new Point(12, 12), Size = new Size(640, 455) };
-            var missing = new GroupBox { Text = "未实现功能", Location = new Point(12, 475), Size = new Size(640, 100) };
-            var note = new Label { Location = new Point(15, 405), Size = new Size(600, 42), ForeColor = Color.Gray };
+            var implemented = new GroupBox { Text = "已实现功能", Location = new Point(12, 12), Size = new Size(640, 460) };
+            var missing = new GroupBox { Text = "未实现功能", Location = new Point(12, 480), Size = new Size(640, 100) };
+            var note = new Label { Location = new Point(15, 425), Size = new Size(600, 30), ForeColor = Color.Gray };
             note.Text = "Wintun 全局 TUN 接管开启后，UDP/DNS/NTP 经虚拟网卡进入代理；HTTP Header 仍需代理转发。TUN 与 WinDivert 网络层归一化互斥。TTL 会随设备指纹自动填入推荐值。";
 
             var lblMode = new Label { Location = new Point(15, 28), AutoSize = true, Text = "运行模式: forward (Windows)" };
@@ -110,6 +111,9 @@ namespace WifiHotspot
             txtTunGateway = NewText(settings.TunGatewayIP, 270, 364, 105);
             var lblPrefix = new Label { Location = new Point(395, 367), AutoSize = true, Text = "前缀:" };
             numPrefix = new NumericUpDown { Location = new Point(440, 364), Size = new Size(55, 23), Minimum = 8, Maximum = 30, Value = settings.TunPrefixLen <= 0 ? 24 : settings.TunPrefixLen };
+            var lblUserAgent = new Label { Location = new Point(15, 395), AutoSize = true, Text = "UA 覆盖:" };
+            txtUserAgent = NewText(settings.UserAgentOverride ?? "", 95, 392, 450);
+            var lblUserAgentHint = new Label { Location = new Point(550, 390), Size = new Size(85, 32), ForeColor = Color.Gray, Text = "留空使用预设，自动对齐 Client Hints" };
 
             chkTun.CheckedChanged += delegate { chkNetwork.Enabled = !chkTun.Checked; };
             chkNetwork.Enabled = !settings.TunEnabled;
@@ -154,6 +158,9 @@ namespace WifiHotspot
             implemented.Controls.Add(txtTunGateway);
             implemented.Controls.Add(lblPrefix);
             implemented.Controls.Add(numPrefix);
+            implemented.Controls.Add(lblUserAgent);
+            implemented.Controls.Add(txtUserAgent);
+            implemented.Controls.Add(lblUserAgentHint);
             implemented.Controls.Add(note);
 
             var chkWebRtc = NewCheck("WebRTC 本地 IP 防泄漏（未实现）", false, 15, 18);
@@ -468,7 +475,7 @@ namespace WifiHotspot
             if (!string.IsNullOrEmpty(xff)) leaks.Add("X-Forwarded-For=" + xff);
             if (!string.IsNullOrEmpty(via)) leaks.Add("Via=" + via);
             if (unrewritten)
-                return "HTTP 改写失败（UA 仍是探针值；请确认当前画像含 User-Agent，并点“保存并重启代理”。当前 UA=" + Short(ua, 60) + "）";
+                return "HTTP 改写失败（UA 仍是探针值；请确认已选预设或填写 UA 覆盖，并点“保存并重启代理”。当前 UA=" + Short(ua, 60) + "）";
             if (leaks.Count > 0)
                 return "HTTP 改写失败（泄露头未清除：" + string.Join("，", leaks.ToArray()) + "）";
             return "HTTP 改写生效（UA=" + Short(ua, 60) + "，XFF/Via 已清除）";
@@ -588,7 +595,8 @@ namespace WifiHotspot
                 TunRoute = chkTunRoute.Checked,
                 TunUpstreamInterface = cmbTunUpstream.SelectedItem == null ? string.Empty : cmbTunUpstream.SelectedItem.ToString(),
                 Mode = "forward",
-                Profile = cmbProfile.SelectedItem == null ? "chrome-win11" : cmbProfile.SelectedItem.ToString()
+                Profile = cmbProfile.SelectedItem == null ? "chrome-win11" : cmbProfile.SelectedItem.ToString(),
+                UserAgentOverride = txtUserAgent.Text.Trim()
             };
         }
 

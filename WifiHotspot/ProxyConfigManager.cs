@@ -34,6 +34,7 @@ namespace WifiHotspot
         public string TunUpstreamInterface { get; set; }
         public string Mode { get; set; }
         public string Profile { get; set; }
+        public string UserAgentOverride { get; set; }
     }
 
     public static class ProxyConfigManager
@@ -89,7 +90,8 @@ namespace WifiHotspot
                 TunRoute = GetBool(tun, "route", true),
                 TunUpstreamInterface = GetString(tun, "upstream_interface", ""),
                 Mode = GetString(root, "mode", "forward"),
-                Profile = profile
+                Profile = profile,
+                UserAgentOverride = GetString(root, "user_agent_override", "")
             };
         }
 
@@ -133,6 +135,7 @@ namespace WifiHotspot
             SetBool(root, "enabled", settings.Enabled);
             SetString(root, "mode", string.IsNullOrEmpty(settings.Mode) ? "forward" : settings.Mode);
             SetString(root, "default_profile", string.IsNullOrEmpty(settings.Profile) ? "chrome-win11" : settings.Profile);
+            SetString(root, "user_agent_override", settings.UserAgentOverride ?? "");
             SetBool(root, "gui_auto_start_proxy", settings.AutoStartProxy);
 
             IDictionary<string, object> network = GetOrCreateDict(root, "network");
@@ -229,6 +232,7 @@ namespace WifiHotspot
   ""listen_http"": ""0.0.0.0:18080"",
   ""listen_https"": ""127.0.0.1:18443"",
   ""default_profile"": ""chrome-win11"",
+  ""user_agent_override"": """",
   ""auto_reload"": true,
   ""gui_auto_start_proxy"": true,
   ""network"": { ""enabled"": false, ""ttl"": 128, ""ipid"": true, ""tcp_options"": true, ""forward"": true, ""mtu_clamp_enabled"": false, ""mss_clamp"": 1460 },

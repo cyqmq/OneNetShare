@@ -11,18 +11,19 @@ import (
 )
 
 type Config struct {
-	Enabled        bool               `json:"enabled"`
-	Mode           string             `json:"mode"`
-	ListenHTTP     string             `json:"listen_http"`
-	ListenHTTPS    string             `json:"listen_https"`
-	DefaultProfile string             `json:"default_profile"`
-	Profiles       map[string]Profile `json:"profiles"`
-	Rules          []Rule             `json:"rules"`
-	Log            LogConfig          `json:"log"`
-	AutoReload     bool               `json:"auto_reload"`
-	Network        NetworkConfig      `json:"network"`
-	TUN            TUNConfig          `json:"tun"`
-	DeviceForge    DeviceForgeConfig  `json:"deviceforge"`
+	Enabled           bool               `json:"enabled"`
+	Mode              string             `json:"mode"`
+	ListenHTTP        string             `json:"listen_http"`
+	ListenHTTPS       string             `json:"listen_https"`
+	DefaultProfile    string             `json:"default_profile"`
+	UserAgentOverride string             `json:"user_agent_override,omitempty"`
+	Profiles          map[string]Profile `json:"profiles"`
+	Rules             []Rule             `json:"rules"`
+	Log               LogConfig          `json:"log"`
+	AutoReload        bool               `json:"auto_reload"`
+	Network           NetworkConfig      `json:"network"`
+	TUN               TUNConfig          `json:"tun"`
+	DeviceForge       DeviceForgeConfig  `json:"deviceforge"`
 }
 
 type NetworkConfig struct {
@@ -268,9 +269,25 @@ func (l *Loader) applyDefaults(cfg *Config) {
 		if cfg.Rules[i].Name == "" {
 			cfg.Rules[i].Name = fmt.Sprintf("rule-%d", i+1)
 		}
+		if cfg.Rules[i].Profile == "" || cfg.Rules[i].Profile == "default" || (cfg.Rules[i].Name == "default-all" && cfg.Rules[i].Profile == "chrome-win11") {
+			cfg.Rules[i].Profile = cfg.DefaultProfile
+		}
 		if len(cfg.Rules[i].Domains) == 0 {
 			cfg.Rules[i].Domains = []string{"*"}
 		}
+	}
+	if cfg.UserAgentOverride != "" {
+		p := cfg.Profiles[cfg.DefaultProfile]
+		if p.Headers == nil {
+			p.Headers = map[string]string{}
+		}
+		p.Headers["User-Agent"] = cfg.UserAgentOverride
+		if preset, ok := ParseUserAgent(cfg.UserAgentOverride); ok {
+			ApplyClientHints(p.Headers, preset)
+		} else {
+			RemoveClientHints(p.Headers)
+		}
+		cfg.Profiles[cfg.DefaultProfile] = p
 	}
 }
 

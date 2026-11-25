@@ -4,6 +4,7 @@
   "listen_http": "0.0.0.0:18080",
   "listen_https": "0.0.0.0:18443",
   "default_profile": "chrome-win11",
+  "user_agent_override": "",
   "auto_reload": true,
   "network": {
     "enabled": false,
@@ -101,7 +102,7 @@
       "name": "default-all",
       "enabled": true,
       "domains": ["*"],
-      "profile": "chrome-win11",
+      "profile": "default",
       "set_headers": {},
       "remove_headers": ["X-Forwarded-For", "X-Real-IP", "Via"],
       "add_headers": {}
