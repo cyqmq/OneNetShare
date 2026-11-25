@@ -5,6 +5,7 @@ using System.Drawing;
 using System.IO;
 using System.Net;
 using System.Net.NetworkInformation;
+using System.Net.Sockets;
 using System.Text;
 using System.Threading;
 using System.Web.Script.Serialization;
@@ -466,14 +467,45 @@ namespace WifiHotspot
                     string line;
                     while ((line = reader.ReadLine()) != null)
                     {
-                        int marker = line.IndexOf('=');
-                        if (marker <= 0) continue;
-                        status[line.Substring(0, marker).Trim()] = line.Substring(marker + 1).Trim();
+                        ParseStatusLine(status, line);
                     }
                 }
             }
             catch { }
             return status;
+        }
+
+        private static void ParseStatusLine(Dictionary<string, string> status, string line)
+        {
+            if (string.IsNullOrWhiteSpace(line)) return;
+            int firstEq = line.IndexOf('=');
+            if (firstEq <= 0) return;
+            if (line.IndexOf('=', firstEq + 1) < 0)
+            {
+                status[line.Substring(0, firstEq).Trim()] = line.Substring(firstEq + 1).Trim();
+                return;
+            }
+
+            string key = null;
+            var value = new StringBuilder();
+            foreach (string token in line.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                int eq = token.IndexOf('=');
+                if (eq <= 0)
+                {
+                    if (key != null)
+                    {
+                        if (value.Length > 0) value.Append(' ');
+                        value.Append(token);
+                    }
+                    continue;
+                }
+                if (key != null) status[key] = value.ToString();
+                key = token.Substring(0, eq).Trim();
+                value.Length = 0;
+                value.Append(token.Substring(eq + 1).Trim());
+            }
+            if (key != null) status[key] = value.ToString();
         }
 
         private string EnsureProxyUsesCurrentConfig()
@@ -540,15 +572,7 @@ namespace WifiHotspot
                 listenerThread.IsBackground = true;
                 listenerThread.Start();
 
-                var request = (HttpWebRequest)WebRequest.Create("http://127.0.0.1:18099/probe");
-                request.Proxy = new WebProxy("http://127.0.0.1:18080", false);
-                request.Method = "GET";
-                request.UserAgent = "OneNetShare-Unprobed/1.0";
-                request.Headers.Add("X-Forwarded-For", "203.0.113.9");
-                request.Headers.Add("Via", "1.1 unprobed");
-                request.Timeout = 5000;
-                request.ReadWriteTimeout = 5000;
-                using (HttpWebResponse response = (HttpWebResponse)request.GetResponse()) { }
+                SendRawProxyProbe();
                 done.WaitOne(3000);
             }
             catch (Exception ex)
@@ -573,10 +597,32 @@ namespace WifiHotspot
             Dictionary<string, string> status = GetProxyStatus();
             string diag = "UA预设=" + StatusValue(status, "ua_preset") + "，UA覆盖=" + Short(StatusValue(status, "user_agent_override"), 30) + "，规则数=" + StatusValue(status, "rules") + "，画像=" + StatusValue(status, "profile") + "，进程=" + StatusValue(status, "version") + " " + Short(StatusValue(status, "exe"), 40);
             if (unrewritten)
-                return "HTTP 改写失败（UA 仍是探针值；请从“UA 预设”选择内置画像，并点“保存并重启代理”。当前 UA=" + Short(ua, 60) + "；" + diag + "）";
+                return "HTTP 改写失败（UA 仍是探针值；请从“UA 预设”选择内置画像，并点“保存并重启代理”。当前 UA=" + Short(ua, 60) + (leaks.Count > 0 ? "；泄露头仍在=" + string.Join("，", leaks.ToArray()) : "") + "；" + diag + "）";
             if (leaks.Count > 0)
                 return "HTTP 改写失败（泄露头未清除：" + string.Join("，", leaks.ToArray()) + "；" + diag + "）";
             return "HTTP 改写生效（UA=" + Short(ua, 60) + "，XFF/Via 已清除）";
+        }
+
+        private static void SendRawProxyProbe()
+        {
+            string request =
+                "GET http://127.0.0.1:18099/probe HTTP/1.1\r\n" +
+                "Host: 127.0.0.1:18099\r\n" +
+                "User-Agent: OneNetShare-Unprobed/1.0\r\n" +
+                "X-Forwarded-For: 203.0.113.9\r\n" +
+                "Via: 1.1 unprobed\r\n" +
+                "Connection: close\r\n\r\n";
+            byte[] payload = Encoding.ASCII.GetBytes(request);
+            using (var client = new TcpClient())
+            {
+                client.Connect("127.0.0.1", 18080);
+                client.SendTimeout = 5000;
+                client.ReceiveTimeout = 5000;
+                NetworkStream stream = client.GetStream();
+                stream.Write(payload, 0, payload.Length);
+                var buffer = new byte[4096];
+                while (stream.Read(buffer, 0, buffer.Length) > 0) { }
+            }
         }
 
         private static string GetHeaderValue(string headers, string name)
