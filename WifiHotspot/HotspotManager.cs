@@ -223,8 +223,8 @@ namespace WifiHotspot
             string capability = MobileHotspotManager.GetCapability(out mobileEnabled);
             if (!MobileHotspotManager.IsAvailable)
             {
-                AddIssue(diagnosis, "Windows 移动热点 API 不可用", capability,
-                    "需要 Windows 10/11；旧系统只能使用传统承载网络。更新系统或改用支持 Hosted Network 的网卡/驱动。", "ms-settings:windowsupdate");
+                AddIssue(diagnosis, "程序未能调用 Windows 移动热点 API", capability,
+                    "程序已尝试命名空间程序集和 Windows 元数据程序集两种加载方式。请确认已安装 .NET Framework 4.8 和 Windows 更新，并使用最新版程序；旧系统只能使用传统承载网络。", "ms-settings:windowsupdate");
             }
             else
             {

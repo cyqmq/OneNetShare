@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Reflection;
 using System.Threading;
 
@@ -15,15 +16,36 @@ namespace WifiHotspot
 
     internal static class MobileHotspotManager
     {
-        private static readonly Type NetworkInformationType = GetWinRTType("Windows.Networking.Connectivity.NetworkInformation, Windows.Networking.Connectivity, ContentType=WindowsRuntime");
-        private static readonly Type ManagerType = GetWinRTType("Windows.Networking.NetworkOperators.NetworkOperatorTetheringManager, Windows.Networking.NetworkOperators, ContentType=WindowsRuntime");
-        private static readonly Type ResultType = GetWinRTType("Windows.Networking.NetworkOperators.NetworkOperatorTetheringOperationResult, Windows.Networking.NetworkOperators, ContentType=WindowsRuntime");
-        private static readonly Type ConfigType = GetWinRTType("Windows.Networking.NetworkOperators.NetworkOperatorTetheringAccessPointConfiguration, Windows.Networking.NetworkOperators, ContentType=WindowsRuntime");
-        private static readonly Type ExtensionType = GetWinRTType("System.WindowsRuntimeSystemExtensions, System.Runtime.WindowsRuntime");
+        private static readonly Type NetworkInformationType = GetWinRTType(
+            "Windows.Networking.Connectivity.NetworkInformation, Windows.Networking.Connectivity, ContentType=WindowsRuntime",
+            "Windows.Networking.Connectivity.NetworkInformation, Windows, ContentType=WindowsRuntime");
+        private static readonly Type ManagerType = GetWinRTType(
+            "Windows.Networking.NetworkOperators.NetworkOperatorTetheringManager, Windows.Networking.NetworkOperators, ContentType=WindowsRuntime",
+            "Windows.Networking.NetworkOperators.NetworkOperatorTetheringManager, Windows, ContentType=WindowsRuntime");
+        private static readonly Type ResultType = GetWinRTType(
+            "Windows.Networking.NetworkOperators.NetworkOperatorTetheringOperationResult, Windows.Networking.NetworkOperators, ContentType=WindowsRuntime",
+            "Windows.Networking.NetworkOperators.NetworkOperatorTetheringOperationResult, Windows, ContentType=WindowsRuntime");
+        private static readonly Type ConfigType = GetWinRTType(
+            "Windows.Networking.NetworkOperators.NetworkOperatorTetheringAccessPointConfiguration, Windows.Networking.NetworkOperators, ContentType=WindowsRuntime",
+            "Windows.Networking.NetworkOperators.NetworkOperatorTetheringAccessPointConfiguration, Windows, ContentType=WindowsRuntime");
+        private static readonly Type ExtensionType = GetWinRTType(
+            "System.WindowsRuntimeSystemExtensions, System.Runtime.WindowsRuntime, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089, processorArchitecture=MSIL",
+            "System.WindowsRuntimeSystemExtensions, System.Runtime.WindowsRuntime");
 
         internal static bool IsAvailable
         {
             get { return NetworkInformationType != null && ManagerType != null && ResultType != null && ConfigType != null && ExtensionType != null; }
+        }
+
+        internal static string GetAvailabilityDetail()
+        {
+            var missing = new List<string>();
+            if (NetworkInformationType == null) missing.Add("NetworkInformation");
+            if (ManagerType == null) missing.Add("NetworkOperatorTetheringManager");
+            if (ResultType == null) missing.Add("NetworkOperatorTetheringOperationResult");
+            if (ConfigType == null) missing.Add("NetworkOperatorTetheringAccessPointConfiguration");
+            if (ExtensionType == null) missing.Add("System.WindowsRuntimeSystemExtensions");
+            return missing.Count == 0 ? "WinRT 类型全部可用" : "未解析的 WinRT 类型: " + string.Join(", ", missing.ToArray());
         }
 
         internal static MobileHotspotState GetState(out string detail)
@@ -103,10 +125,23 @@ namespace WifiHotspot
             return result ?? new HotspotResult { Success = false, Message = "Windows 移动热点 API 未返回结果" };
         }
 
-        private static Type GetWinRTType(string name)
+        private static Type GetWinRTType(params string[] names)
         {
-            try { return Type.GetType(name, false); }
-            catch { return null; }
+            foreach (string name in names)
+            {
+                try
+                {
+                    if (name.IndexOf("System.Runtime.WindowsRuntime", StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        try { Assembly.Load("System.Runtime.WindowsRuntime"); }
+                        catch { }
+                    }
+                    Type type = Type.GetType(name, false);
+                    if (type != null) return type;
+                }
+                catch { }
+            }
+            return null;
         }
 
         internal static string GetCapability(out bool enabled)
@@ -114,7 +149,7 @@ namespace WifiHotspot
             enabled = false;
             try
             {
-                if (!IsAvailable) return "当前 Windows 版本不提供移动热点 API";
+                if (!IsAvailable) return "当前进程未能加载 Windows 移动热点 API。" + GetAvailabilityDetail();
                 object profile = GetProfile();
                 if (profile == null) return "没有可用的互联网连接配置文件";
                 MethodInfo method = FindMethod(ManagerType, "GetTetheringCapabilityFromConnectionProfile", 1, true);
