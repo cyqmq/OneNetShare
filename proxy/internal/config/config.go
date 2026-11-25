@@ -12,6 +12,7 @@ import (
 
 type Config struct {
 	Enabled           bool               `json:"enabled"`
+	GUIGeneration     string             `json:"gui_generation,omitempty"`
 	Mode              string             `json:"mode"`
 	ListenHTTP        string             `json:"listen_http"`
 	ListenHTTPS       string             `json:"listen_https"`

@@ -2,6 +2,8 @@ package version
 
 import "fmt"
 
+var Revision = "dev"
+
 const (
 	Major = 1
 	Minor = 0

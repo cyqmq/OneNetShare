@@ -206,6 +206,8 @@ curl http://127.0.0.1:18089/status
 iptables -t nat -L HOTSPOT_PROXY -n -v
 ```
 
+`/status` 会输出 `version`、`revision`、`pid`、`exe`、`generation` 以及当前 `ua_preset`；GUI 用 `generation` 判断 18080 上的进程是否仍是当前配置，不匹配会自动重启该进程。
+
 ### Windows 原型
 
 将 `build/hotspot-proxy-win-x86.exe`、`config.json`（mode 改为 `forward`）、`scripts/run-windows.bat` 放同一目录，双击 bat。浏览器设置代理：

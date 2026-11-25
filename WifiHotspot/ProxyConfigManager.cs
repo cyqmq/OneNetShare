@@ -118,6 +118,20 @@ namespace WifiHotspot
             return profiles;
         }
 
+        public static string GetGeneration(string path = null)
+        {
+            string configPath = string.IsNullOrEmpty(path) ? DefaultConfigPath : path;
+            if (!File.Exists(configPath)) return "";
+            try
+            {
+                var serializer = new JavaScriptSerializer();
+                object parsed = serializer.DeserializeObject(File.ReadAllText(configPath, Encoding.UTF8));
+                IDictionary<string, object> root = parsed as IDictionary<string, object>;
+                return root == null ? "" : GetString(root, "gui_generation", "");
+            }
+            catch { return ""; }
+        }
+
         public static Dictionary<string, string> GetUAPresets()
         {
             return new Dictionary<string, string>
@@ -155,6 +169,7 @@ namespace WifiHotspot
             IDictionary<string, object> deviceforge = GetOrCreateDict(root, "deviceforge");
 
             SetBool(root, "enabled", settings.Enabled);
+            SetString(root, "gui_generation", Guid.NewGuid().ToString("N"));
             SetString(root, "mode", string.IsNullOrEmpty(settings.Mode) ? "forward" : settings.Mode);
             SetString(root, "default_profile", string.IsNullOrEmpty(settings.Profile) ? "chrome-win11" : settings.Profile);
             SetString(root, "ua_preset", settings.UAPreset ?? "");

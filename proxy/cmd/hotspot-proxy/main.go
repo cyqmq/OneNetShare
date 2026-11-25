@@ -212,8 +212,11 @@ func startStatusServer(loader *config.Loader, logger *log.Logger, stop func()) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/status", func(w http.ResponseWriter, r *http.Request) {
 		cfg := loader.Get()
-		fmt.Fprintf(w, "mode=%s enabled=%v profile=%s rules=%d tun=%v\n",
-			cfg.Mode, cfg.Enabled, cfg.DefaultProfile, len(cfg.Rules), cfg.TUN.Enabled)
+		exe, _ := os.Executable()
+		fmt.Fprintf(w, "version=%s revision=%s pid=%d exe=%s\n", version.String(), version.Revision, os.Getpid(), exe)
+		fmt.Fprintf(w, "generation=%s\n", cfg.GUIGeneration)
+		fmt.Fprintf(w, "mode=%s enabled=%v profile=%s ua_preset=%s user_agent_override=%s rules=%d tun=%v\n",
+			cfg.Mode, cfg.Enabled, cfg.DefaultProfile, cfg.UAPreset, cfg.UserAgentOverride, len(cfg.Rules), cfg.TUN.Enabled)
 		fmt.Fprintf(w, "deviceforge=%v target=%s udp=%v dns=%v ntp=%v mdns=%v dhcp=%v captive=%v/%s headers=%v\n",
 			cfg.DeviceForge.Enabled, cfg.DeviceForge.TargetOS, cfg.DeviceForge.UDP.Enabled,
 			cfg.DeviceForge.DNS.Enabled, cfg.DeviceForge.NTP.Enabled,

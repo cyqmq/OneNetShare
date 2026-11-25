@@ -1,5 +1,6 @@
 {
   "enabled": true,
+  "gui_generation": "",
   "mode": "redirect",
   "listen_http": "0.0.0.0:18080",
   "listen_https": "0.0.0.0:18443",

@@ -420,8 +420,58 @@ namespace WifiHotspot
                 : "仍需检查；" + http + "；" + tun;
         }
 
+        private static Dictionary<string, string> GetProxyStatus()
+        {
+            var status = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                var request = (HttpWebRequest)WebRequest.Create("http://127.0.0.1:18089/status");
+                request.Method = "GET";
+                request.Timeout = 1200;
+                request.ReadWriteTimeout = 1200;
+                using (HttpWebResponse response = (HttpWebResponse)request.GetResponse())
+                using (var reader = new StreamReader(response.GetResponseStream(), Encoding.UTF8))
+                {
+                    string line;
+                    while ((line = reader.ReadLine()) != null)
+                    {
+                        int marker = line.IndexOf('=');
+                        if (marker <= 0) continue;
+                        status[line.Substring(0, marker).Trim()] = line.Substring(marker + 1).Trim();
+                    }
+                }
+            }
+            catch { }
+            return status;
+        }
+
+        private string EnsureProxyUsesCurrentConfig()
+        {
+            string expected = ProxyConfigManager.GetGeneration(_configPath);
+            if (string.IsNullOrEmpty(expected)) return null;
+            Dictionary<string, string> status = GetProxyStatus();
+            string actual = status.ContainsKey("generation") ? status["generation"] : "";
+            if (actual == expected) return null;
+
+            string stop = ProxyProcessManager.Stop();
+            string start = ProxyProcessManager.Start(_configPath);
+            status = GetProxyStatus();
+            actual = status.ContainsKey("generation") ? status["generation"] : "";
+            if (actual != expected)
+                return "HTTP 改写失败（代理进程不是当前配置：停止=" + stop + "，启动=" + start + "，进程配置=" + Short(actual, 16) + "，期望配置=" + Short(expected, 16) + "，进程=" + StatusValue(status, "version") + " " + StatusValue(status, "exe") + "）";
+            return null;
+        }
+
+        private static string StatusValue(Dictionary<string, string> status, string key)
+        {
+            string value;
+            return status.TryGetValue(key, out value) ? value : "未知";
+        }
+
         private string TestHttpRewrite()
         {
+            string stale = EnsureProxyUsesCurrentConfig();
+            if (stale != null) return stale;
             if (!ProxyProcessManager.IsRunning()) return "HTTP 改写失败（代理未运行）";
             ProxySettings settings = ProxyConfigManager.Load(_configPath);
             if (!settings.Enabled || !settings.DeviceForgeEnabled || !settings.Headers)
