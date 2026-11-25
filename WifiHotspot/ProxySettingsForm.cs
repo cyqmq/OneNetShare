@@ -486,6 +486,14 @@ namespace WifiHotspot
 
             string stop = ProxyProcessManager.Stop();
             string start = ProxyProcessManager.Start(_configPath);
+            for (int i = 0; i < 12; i++)
+            {
+                status = GetProxyStatus();
+                actual = status.ContainsKey("generation") ? status["generation"] : "";
+                if (actual == expected) return null;
+                if (status.Count > 0 && StatusValue(status, "version") != "未知") break;
+                Thread.Sleep(250);
+            }
             status = GetProxyStatus();
             actual = status.ContainsKey("generation") ? status["generation"] : "";
             if (actual != expected)
