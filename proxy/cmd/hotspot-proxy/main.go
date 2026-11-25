@@ -38,6 +38,11 @@ func main() {
 	path := config.ResolveConfigPath(*configPath)
 	var logger *log.Logger
 	cfg0, err := config.LoadRaw(path)
+	if err == nil {
+		if p := os.Getenv("HOTSPOT_PROXY_LOG_FILE"); p != "" {
+			cfg0.Log.File = p
+		}
+	}
 	if err == nil && cfg0.Log.File != "" {
 		f, ferr := os.OpenFile(cfg0.Log.File, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 		if ferr == nil {
@@ -69,6 +74,9 @@ func main() {
 			logger.Fatalf("TUN 初始化失败: %v", err)
 		}
 		tunDev.SetTTL(cfg.TUN.TTL)
+		if cfg.Network.MtuClamp {
+			tunDev.SetMSS(cfg.Network.MssClamp)
+		}
 		route := true
 		if cfg.TUN.Route != nil {
 			route = *cfg.TUN.Route

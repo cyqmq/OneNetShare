@@ -3,11 +3,41 @@ package deviceforge
 import (
 	"encoding/binary"
 	"net"
+	"strings"
 
 	"hotspot-proxy/internal/config"
 )
 
 const dnsTypeAAAA = 28
+
+func CaptiveDNSName(query []byte) string {
+	if len(query) < 13 {
+		return ""
+	}
+	name, _, err := decodeDNSName(query, 12)
+	if err != nil {
+		return ""
+	}
+	return name
+}
+
+func CaptiveProbeLabel(name string) string {
+	lower := strings.ToLower(name)
+	switch {
+	case strings.Contains(lower, "apple"):
+		return "苹果 Captive 探针"
+	case strings.Contains(lower, "msft") || strings.Contains(lower, "microsoft"):
+		return "微软 Captive 探针"
+	case strings.Contains(lower, "android") || strings.Contains(lower, "google") || strings.Contains(lower, "gstatic"):
+		return "安卓 Captive 探针"
+	case strings.Contains(lower, "firefox") || strings.Contains(lower, "mozill"):
+		return "Firefox Captive 探针"
+	case name == "":
+		return "Captive 探针"
+	default:
+		return name
+	}
+}
 
 func CaptiveDNSReply(query []byte, cfg config.CaptiveConfig, localIP net.IP) ([]byte, bool) {
 	if !cfg.Enabled || query == nil || len(query) < 17 {

@@ -8,6 +8,11 @@ namespace WifiHotspot
 {
     public static class ProxyProcessManager
     {
+        public static string ProbeLogPath
+        {
+            get { return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "probe.log"); }
+        }
+
         public static bool IsRunning()
         {
             Process[] processes = Process.GetProcessesByName("hotspot-proxy");
@@ -30,6 +35,7 @@ namespace WifiHotspot
                     WindowStyle = ProcessWindowStyle.Hidden,
                     WorkingDirectory = AppDomain.CurrentDomain.BaseDirectory
                 };
+                psi.EnvironmentVariables["HOTSPOT_PROXY_LOG_FILE"] = ProbeLogPath;
                 Process process = Process.Start(psi);
                 if (process != null) process.Dispose();
                 Thread.Sleep(600);

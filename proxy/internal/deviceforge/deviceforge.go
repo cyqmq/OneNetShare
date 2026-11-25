@@ -1,6 +1,7 @@
 package deviceforge
 
 import (
+	"bytes"
 	"fmt"
 	"log"
 	"net"
@@ -77,6 +78,12 @@ func (m *Manager) HandleUDP(srcIP net.IP, srcPort uint16, dstIP net.IP, dstPort 
 	if cfg.Captive.Enabled && dstPort == 53 {
 		resp, handled := CaptiveDNSReply(payload, cfg.Captive, dstIP)
 		if handled {
+			label := CaptiveProbeLabel(CaptiveDNSName(payload))
+			if cfg.Captive.Mode == "drop" {
+				m.logger.Printf("[probe] 拦截 %s -> 丢弃", label)
+			} else if len(resp) > 0 {
+				m.logger.Printf("[probe] 拦截 %s -> 伪造返回成功", label)
+			}
 			if len(resp) > 0 {
 				if err := sender.SendUDP(dstIP, dstPort, srcIP, srcPort, resp); err != nil {
 					m.logger.Printf("[deviceforge] captive dns: %v", err)
@@ -87,16 +94,22 @@ func (m *Manager) HandleUDP(srcIP net.IP, srcPort uint16, dstIP net.IP, dstPort 
 	}
 
 	if !m.allowed(cfg, dstPort) {
+		m.logger.Printf("[probe] 阻止未知 UDP 转发 %s:%d -> %s:%d", srcIP, srcPort, dstIP, dstPort)
 		return
 	}
 
 	if cfg.DNS.Enabled && dstPort == 53 {
+		name := DNSQueryName(payload)
 		q, forward := NormalizeDNSQuery(payload, cfg.DNS)
 		if !forward {
+			m.logger.Printf("[probe] DNS 查询 %s -> 强制 TCP 重试", name)
 			if err := sender.SendUDP(dstIP, dstPort, srcIP, srcPort, q); err != nil {
 				m.logger.Printf("[deviceforge] dns tcpretry: %v", err)
 			}
 			return
+		}
+		if !bytes.Equal(q, payload) {
+			m.logger.Printf("[probe] DNS 查询 %s -> 去 EDNS/清 AD/CD", name)
 		}
 		payload = q
 	}

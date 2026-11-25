@@ -112,6 +112,12 @@ GOOS=windows GOARCH=386 CGO_ENABLED=0 go build -o build/hotspot-proxy-win-x86.ex
   "mode": "redirect",           // redirect (OpenWrt) / forward (Windows)
   "listen_http": "0.0.0.0:18080",
   "listen_https": "0.0.0.0:18443",
+  "network": {
+    "enabled": false,
+    "ttl": 128,
+    "mtu_clamp_enabled": false,
+    "mss_clamp": 1460
+  },
   "tun": {
     "enabled": true,
     "name": "OneNetShare Tunnel",
@@ -164,7 +170,7 @@ GOOS=windows GOARCH=386 CGO_ENABLED=0 go build -o build/hotspot-proxy-win-x86.ex
 }
 ```
 
-Windows 下 `tun.enabled=true` 使用 Wintun 全局接管：需把官方 x86 `wintun.dll` 放在 `hotspot-proxy.exe` 同目录并以管理员运行。`upstream_interface` 留空时自动读取 IPv4 默认路由对应的物理网卡；代理上游 TCP/UDP 会绑定到该网卡，避免流量重新进入 TUN。退出时通过 `GET /shutdown` 或直接信号恢复路由。`tun.ttl` 与 GUI 的“强制 TTL”共用：Windows 画像推荐 128，Android/macOS/iOS/Linux 画像推荐 64，GUI 切换画像时会自动填入并显示防呆提示。
+Windows 下 `tun.enabled=true` 使用 Wintun 全局接管：需把官方 x86 `wintun.dll` 放在 `hotspot-proxy.exe` 同目录并以管理员运行。GUI 会列出真实物理网卡供用户选择出口网卡；`upstream_interface` 留空时自动读取 IPv4 默认路由对应的物理网卡，代理上游 TCP/UDP 会绑定到该网卡，避免流量重新进入 TUN。退出时通过 `GET /shutdown` 或直接信号恢复路由。`tun.ttl` 与 GUI 的“强制 TTL”共用：Windows 画像推荐 128，Android/macOS/iOS/Linux 画像推荐 64，GUI 切换画像时会自动填入并显示防呆提示。`network.mtu_clamp_enabled=true` 时，WinDivert SYN MSS 与 Wintun 合成 SYN-ACK MSS 都会被钳制到 `mss_clamp`；遇到 TLS 握手卡住时可将 1460 降到 1360/1280。经 GUI 启动的代理会把 `[probe]` 事件写入程序目录 `probe.log`，供代理功能窗口滚动显示 Captive/DNS/未知 UDP 事件。
 
 内置画像名：`chrome-win11`, `chrome-win10`, `edge-win11`, `chrome-android`, `safari-ios`, `safari-macos`, `firefox-win11`, `curl-linux`。
 

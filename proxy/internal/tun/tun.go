@@ -65,6 +65,7 @@ type Device struct {
 	udpHandler     UDPHandler
 	ipid           uint16
 	ttl            byte
+	mss            int
 	mu             sync.Mutex
 	closeOnce      sync.Once
 	wg             sync.WaitGroup
@@ -100,6 +101,13 @@ func (d *Device) SetTTL(ttl int) {
 		ttl = 64
 	}
 	d.ttl = byte(ttl)
+}
+
+func (d *Device) SetMSS(mss int) {
+	if mss < 1 || mss > 65535 {
+		mss = 1460
+	}
+	d.mss = mss
 }
 
 func (d *Device) Close() {
@@ -145,7 +153,11 @@ func (d *Device) writePacket(pkt []byte) error {
 func (d *Device) sendPacket(dstIP net.IP, dstPort uint16, srcIP net.IP, srcPort uint16,
 	seq, ack uint32, flags byte, payload []byte) error {
 
-	tcpLen := 20 + len(payload)
+	optLen := 0
+	if flags&synFlag != 0 && flags&ackFlag != 0 && d.mss > 0 {
+		optLen = 4
+	}
+	tcpLen := 20 + optLen + len(payload)
 	totalLen := 20 + tcpLen
 
 	pkt := make([]byte, totalLen)
@@ -165,12 +177,17 @@ func (d *Device) sendPacket(dstIP net.IP, dstPort uint16, srcIP net.IP, srcPort 
 	binary.BigEndian.PutUint16(t[2:4], dstPort)
 	binary.BigEndian.PutUint32(t[4:8], seq)
 	binary.BigEndian.PutUint32(t[8:12], ack)
-	t[12] = 5 << 4
+	t[12] = byte(((20 + optLen) / 4) << 4)
 	t[13] = flags
 	binary.BigEndian.PutUint16(t[14:16], 8192)
 	binary.BigEndian.PutUint16(t[16:18], 0)
 	binary.BigEndian.PutUint16(t[18:20], 0)
-	copy(t[20:], payload)
+	if optLen == 4 {
+		t[20] = 2
+		t[21] = 4
+		binary.BigEndian.PutUint16(t[22:24], uint16(d.mss))
+	}
+	copy(t[20+optLen:], payload)
 
 	ph := make([]byte, 12+tcpLen)
 	copy(ph[0:4], srcIP.To4())

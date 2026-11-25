@@ -20,8 +20,15 @@ type Config struct {
 	Rules          []Rule             `json:"rules"`
 	Log            LogConfig          `json:"log"`
 	AutoReload     bool               `json:"auto_reload"`
+	Network        NetworkConfig      `json:"network"`
 	TUN            TUNConfig          `json:"tun"`
 	DeviceForge    DeviceForgeConfig  `json:"deviceforge"`
+}
+
+type NetworkConfig struct {
+	Enabled  bool `json:"enabled"`
+	MtuClamp bool `json:"mtu_clamp_enabled"`
+	MssClamp int  `json:"mss_clamp"`
 }
 
 type TUNConfig struct {
@@ -202,6 +209,9 @@ func (l *Loader) applyDefaults(cfg *Config) {
 	if cfg.Log.Level == "" {
 		cfg.Log.Level = "info"
 	}
+	if cfg.Network.MssClamp <= 0 || cfg.Network.MssClamp > 65535 {
+		cfg.Network.MssClamp = 1460
+	}
 	if cfg.TUN.Name == "" {
 		if runtime.GOOS == "windows" {
 			cfg.TUN.Name = "OneNetShare Tunnel"
@@ -308,6 +318,7 @@ func DefaultJSON() string {
   "listen_https": "0.0.0.0:18443",
   "default_profile": "chrome-win11",
   "auto_reload": true,
+  "network": {"enabled": false, "mtu_clamp_enabled": false, "mss_clamp": 1460},
   "log": {"level": "info", "file": ""},
   "tun": {
     "enabled": false,

@@ -213,11 +213,16 @@ namespace WifiHotspot
                 return false;
             }
 
-            if (!settings.NetworkTCPOptions || protocol != 6) return changed;
-            return RewriteTcpOptions(packet, ref length, ipLength, ipv4) || changed;
+            if (protocol != 6) return changed;
+            int mssClamp = settings.MtuClampEnabled && settings.MssClamp > 0 ? settings.MssClamp : 1460;
+            if (settings.NetworkTCPOptions)
+                return RewriteTcpOptions(packet, ref length, ipLength, ipv4, mssClamp) || changed;
+            if (settings.MtuClampEnabled)
+                return ClampTcpMss(packet, ipLength, length, mssClamp) || changed;
+            return changed;
         }
 
-        private static bool RewriteTcpOptions(byte[] packet, ref int length, int ipLength, bool ipv4)
+        private static bool RewriteTcpOptions(byte[] packet, ref int length, int ipLength, bool ipv4, int mssClamp)
         {
             int tcp = ipLength;
             if (length < tcp + 20) return false;
@@ -241,7 +246,7 @@ namespace WifiHotspot
             }
 
             WriteU16(packet, tcp + 14, 65535);
-            byte[] options = BuildTcpOptions();
+            byte[] options = BuildTcpOptions(mssClamp);
             if (optionLength == options.Length)
             {
                 bool same = true;
@@ -271,11 +276,41 @@ namespace WifiHotspot
             return true;
         }
 
-        private static byte[] BuildTcpOptions()
+        private static bool ClampTcpMss(byte[] packet, int tcp, int length, int mssClamp)
         {
+            if (length < tcp + 20) return false;
+            int dataOffset = (packet[tcp + 12] >> 4) * 4;
+            if (dataOffset < 20 || tcp + dataOffset > length) return false;
+            if ((packet[tcp + 13] & 0x02) == 0) return false;
+
+            int cursor = tcp + 20;
+            int end = tcp + dataOffset;
+            while (cursor < end)
+            {
+                int kind = packet[cursor];
+                if (kind == 0) break;
+                if (kind == 1) { cursor++; continue; }
+                if (cursor + 1 >= end) break;
+                int optionSize = packet[cursor + 1];
+                if (optionSize < 2) break;
+                if (kind == 2 && optionSize >= 4)
+                {
+                    int current = ReadU16(packet, cursor + 2);
+                    if (current <= mssClamp) return false;
+                    WriteU16(packet, cursor + 2, (ushort)mssClamp);
+                    return true;
+                }
+                cursor += optionSize;
+            }
+            return false;
+        }
+
+        private static byte[] BuildTcpOptions(int mssClamp)
+        {
+            int mss = mssClamp > 0 && mssClamp <= 65535 ? mssClamp : 1460;
             return new byte[]
             {
-                2, 4, 0x05, 0xB4,
+                2, 4, (byte)(mss >> 8), (byte)mss,
                 3, 3, 8,
                 4, 2,
                 1, 1,

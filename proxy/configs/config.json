@@ -10,7 +10,9 @@
     "ttl": 128,
     "ipid": true,
     "tcp_options": true,
-    "forward": true
+    "forward": true,
+    "mtu_clamp_enabled": false,
+    "mss_clamp": 1460
   },
   "tun": {
     "enabled": false,

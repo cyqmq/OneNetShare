@@ -16,6 +16,17 @@ const (
 	dnsTypeOPT = 41
 )
 
+func DNSQueryName(query []byte) string {
+	if len(query) < 13 {
+		return ""
+	}
+	name, _, err := decodeDNSName(query, 12)
+	if err != nil {
+		return ""
+	}
+	return name
+}
+
 func NormalizeDNSQuery(msg []byte, cfg config.DNSForgeConfig) ([]byte, bool) {
 	if len(msg) < 12 {
 		return append([]byte(nil), msg...), true

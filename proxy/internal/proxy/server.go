@@ -50,7 +50,9 @@ func (s *Server) handleCaptive(client net.Conn, req *headers.Request) bool {
 	if !cfg.DeviceForge.Enabled || !config.CaptiveHTTPMatch(c, req.Host, path) {
 		return false
 	}
+	label := captiveHTTPLabel(req.Host)
 	if c.Mode == "drop" {
+		s.logger.Printf("[probe] 拦截 %s -> 丢弃", label)
 		return true
 	}
 
@@ -61,7 +63,26 @@ func (s *Server) handleCaptive(client net.Conn, req *headers.Request) bool {
 	body := c.HTTPBody
 	fmt.Fprintf(client, "HTTP/1.1 %d %s\r\nContent-Length: %d\r\nConnection: close\r\nCache-Control: no-store\r\n\r\n%s",
 		code, http.StatusText(code), len(body), body)
+	s.logger.Printf("[probe] 拦截 %s -> 伪造返回 %d", label, code)
 	return true
+}
+
+func captiveHTTPLabel(host string) string {
+	lower := strings.ToLower(host)
+	switch {
+	case strings.Contains(lower, "apple"):
+		return "苹果 Captive 探针"
+	case strings.Contains(lower, "msft") || strings.Contains(lower, "microsoft"):
+		return "微软 Captive 探针"
+	case strings.Contains(lower, "android") || strings.Contains(lower, "google") || strings.Contains(lower, "gstatic"):
+		return "安卓 Captive 探针"
+	case strings.Contains(lower, "firefox") || strings.Contains(lower, "mozill"):
+		return "Firefox Captive 探针"
+	case host == "":
+		return "Captive 探针"
+	default:
+		return host
+	}
 }
 
 func (s *Server) listen(addr string) (net.Listener, error) {

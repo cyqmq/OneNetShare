@@ -1,6 +1,13 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
+using System.IO;
+using System.Net;
+using System.Net.NetworkInformation;
+using System.Text;
+using System.Threading;
+using System.Web.Script.Serialization;
 using System.Windows.Forms;
 
 namespace WifiHotspot
@@ -22,6 +29,8 @@ namespace WifiHotspot
         private readonly CheckBox chkIPID;
         private readonly CheckBox chkTcpOptions;
         private readonly CheckBox chkForward;
+        private readonly CheckBox chkMtuClamp;
+        private readonly NumericUpDown numMssClamp;
         private readonly CheckBox chkTun;
         private readonly CheckBox chkTunRoute;
         private readonly NumericUpDown numTTL;
@@ -31,8 +40,11 @@ namespace WifiHotspot
         private readonly TextBox txtTunAdapter;
         private readonly TextBox txtTunIP;
         private readonly TextBox txtTunGateway;
-        private readonly TextBox txtTunUpstream;
+        private readonly ComboBox cmbTunUpstream;
         private readonly ComboBox cmbProfile;
+        private readonly TextBox txtProbeLog;
+        private readonly System.Windows.Forms.Timer probeTimer;
+        private long _probeLogOffset;
         private readonly Label lblResult;
 
         public ProxySettingsForm()
@@ -46,12 +58,12 @@ namespace WifiHotspot
             MaximizeBox = false;
             MinimizeBox = false;
             ShowInTaskbar = false;
-            ClientSize = new Size(680, 690);
+            ClientSize = new Size(680, 940);
             Font = new Font("Microsoft YaHei", 9F, FontStyle.Regular, GraphicsUnit.Point, 134);
 
-            var implemented = new GroupBox { Text = "已实现功能", Location = new Point(12, 12), Size = new Size(640, 415) };
-            var missing = new GroupBox { Text = "未实现功能", Location = new Point(12, 427), Size = new Size(640, 130) };
-            var note = new Label { Location = new Point(15, 370), Size = new Size(600, 38), ForeColor = Color.Gray };
+            var implemented = new GroupBox { Text = "已实现功能", Location = new Point(12, 12), Size = new Size(640, 455) };
+            var missing = new GroupBox { Text = "未实现功能", Location = new Point(12, 475), Size = new Size(640, 100) };
+            var note = new Label { Location = new Point(15, 405), Size = new Size(600, 42), ForeColor = Color.Gray };
             note.Text = "Wintun 全局 TUN 接管开启后，UDP/DNS/NTP 经虚拟网卡进入代理；HTTP Header 仍需代理转发。TUN 与 WinDivert 网络层归一化互斥。TTL 会随设备指纹自动填入推荐值。";
 
             var lblMode = new Label { Location = new Point(15, 28), AutoSize = true, Text = "运行模式: forward (Windows)" };
@@ -79,21 +91,28 @@ namespace WifiHotspot
             chkIPID = NewCheck("IPID 归一化", settings.NetworkIPID, 15, 245);
             chkTcpOptions = NewCheck("TCP SYN 选项归一化", settings.NetworkTCPOptions, 200, 245);
             chkForward = NewCheck("同时接管转发流量", settings.NetworkForward, 430, 245);
-            chkTun = NewCheck("全局 TUN 接管 (Wintun)", settings.TunEnabled, 15, 275);
-            chkTunRoute = NewCheck("接管默认路由与 DNS", settings.TunRoute, 200, 275);
-            var lblAdapter = new Label { Location = new Point(15, 307), AutoSize = true, Text = "虚拟网卡:" };
-            txtTunAdapter = NewText(settings.TunAdapter, 95, 304, 205);
-            var lblUpstream = new Label { Location = new Point(315, 307), AutoSize = true, Text = "出口网卡:" };
-            txtTunUpstream = NewText(settings.TunUpstreamInterface, 385, 304, 235);
-            var lblTunIP = new Label { Location = new Point(15, 337), AutoSize = true, Text = "TUN IP:" };
-            txtTunIP = NewText(settings.TunIP, 95, 334, 105);
-            var lblGateway = new Label { Location = new Point(220, 337), AutoSize = true, Text = "网关:" };
-            txtTunGateway = NewText(settings.TunGatewayIP, 270, 334, 105);
-            var lblPrefix = new Label { Location = new Point(395, 337), AutoSize = true, Text = "前缀:" };
-            numPrefix = new NumericUpDown { Location = new Point(440, 334), Size = new Size(55, 23), Minimum = 8, Maximum = 30, Value = settings.TunPrefixLen <= 0 ? 24 : settings.TunPrefixLen };
+            chkMtuClamp = NewCheck("MTU/MSS 钳制 (自动降级)", settings.MtuClampEnabled, 15, 275);
+            var lblMss = new Label { Location = new Point(190, 278), AutoSize = true, Text = "MSS:" };
+            numMssClamp = new NumericUpDown { Location = new Point(230, 275), Size = new Size(65, 23), Minimum = 576, Maximum = 1460, Value = settings.MssClamp > 0 ? settings.MssClamp : 1460, Enabled = settings.MtuClampEnabled };
+            var lblMssHint = new Label { Location = new Point(305, 274), Size = new Size(320, 30), ForeColor = Color.Gray };
+            lblMssHint.Text = "网站握手异常时开启；1460 偏大，建议先试 1360 或 1280。";
+            chkTun = NewCheck("全局 TUN 接管 (Wintun)", settings.TunEnabled, 15, 305);
+            chkTunRoute = NewCheck("接管默认路由与 DNS", settings.TunRoute, 200, 305);
+            var lblAdapter = new Label { Location = new Point(15, 337), AutoSize = true, Text = "虚拟网卡:" };
+            txtTunAdapter = NewText(settings.TunAdapter, 95, 334, 205);
+            var lblUpstream = new Label { Location = new Point(315, 337), AutoSize = true, Text = "出口网卡:" };
+            cmbTunUpstream = new ComboBox { Location = new Point(385, 334), Size = new Size(235, 23), DropDownStyle = ComboBoxStyle.DropDownList };
+            LoadUpstreamInterfaces(settings.TunUpstreamInterface);
+            var lblTunIP = new Label { Location = new Point(15, 367), AutoSize = true, Text = "TUN IP:" };
+            txtTunIP = NewText(settings.TunIP, 95, 364, 105);
+            var lblGateway = new Label { Location = new Point(220, 367), AutoSize = true, Text = "网关:" };
+            txtTunGateway = NewText(settings.TunGatewayIP, 270, 364, 105);
+            var lblPrefix = new Label { Location = new Point(395, 367), AutoSize = true, Text = "前缀:" };
+            numPrefix = new NumericUpDown { Location = new Point(440, 364), Size = new Size(55, 23), Minimum = 8, Maximum = 30, Value = settings.TunPrefixLen <= 0 ? 24 : settings.TunPrefixLen };
 
             chkTun.CheckedChanged += delegate { chkNetwork.Enabled = !chkTun.Checked; };
             chkNetwork.Enabled = !settings.TunEnabled;
+            chkMtuClamp.CheckedChanged += delegate { numMssClamp.Enabled = chkMtuClamp.Checked; };
             cmbProfile.SelectedIndexChanged += delegate { ApplyProfileTTL(); };
             numTTL.ValueChanged += delegate { if (!_updatingTtlFromProfile) UpdateTtlHint(); };
             UpdateTtlHint();
@@ -118,12 +137,16 @@ namespace WifiHotspot
             implemented.Controls.Add(chkIPID);
             implemented.Controls.Add(chkTcpOptions);
             implemented.Controls.Add(chkForward);
+            implemented.Controls.Add(chkMtuClamp);
+            implemented.Controls.Add(lblMss);
+            implemented.Controls.Add(numMssClamp);
+            implemented.Controls.Add(lblMssHint);
             implemented.Controls.Add(chkTun);
             implemented.Controls.Add(chkTunRoute);
             implemented.Controls.Add(lblAdapter);
             implemented.Controls.Add(txtTunAdapter);
             implemented.Controls.Add(lblUpstream);
-            implemented.Controls.Add(txtTunUpstream);
+            implemented.Controls.Add(cmbTunUpstream);
             implemented.Controls.Add(lblTunIP);
             implemented.Controls.Add(txtTunIP);
             implemented.Controls.Add(lblGateway);
@@ -132,25 +155,37 @@ namespace WifiHotspot
             implemented.Controls.Add(numPrefix);
             implemented.Controls.Add(note);
 
-            var chkWebRtc = NewCheck("WebRTC 本地 IP 防泄漏（未实现）", false, 15, 30);
-            var chkStun = NewCheck("STUN MESSAGE-INTEGRITY 重算（未实现）", false, 330, 30);
-            var chkTls = NewCheck("TLS JA3/JA4 统一（未实现）", false, 15, 60);
+            var chkWebRtc = NewCheck("WebRTC 本地 IP 防泄漏（未实现）", false, 15, 18);
+            var chkStun = NewCheck("STUN MESSAGE-INTEGRITY 重算（未实现）", false, 330, 18);
+            var chkTls = NewCheck("TLS JA3/JA4 统一（未实现）", false, 15, 48);
             chkWebRtc.Enabled = false;
             chkStun.Enabled = false;
             chkTls.Enabled = false;
-            var missingNote = new Label { Location = new Point(15, 95), Size = new Size(600, 30), ForeColor = Color.Gray };
+            var missingNote = new Label { Location = new Point(15, 72), Size = new Size(600, 26), ForeColor = Color.Gray };
             missingNote.Text = "HTTPS 当前是 TCP 透传，不做 MITM，无法改写 SDP 或 ClientHello；STUN 目前只转发 UDP，不解析/重算 MESSAGE-INTEGRITY。";
             missing.Controls.Add(chkWebRtc);
             missing.Controls.Add(chkStun);
             missing.Controls.Add(chkTls);
             missing.Controls.Add(missingNote);
 
-            lblResult = new Label { Location = new Point(12, 565), Size = new Size(640, 45), ForeColor = Color.DarkGreen };
+            var grpProbe = new GroupBox { Text = "探针日志 / 连通性测试", Location = new Point(12, 583), Size = new Size(640, 250) };
+            txtProbeLog = new TextBox { Multiline = true, ReadOnly = true, Dock = DockStyle.Fill, ScrollBars = ScrollBars.Vertical, BackColor = Color.White, Font = new Font("Consolas", 9F) };
+            var probePanel = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 44, FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(6, 6, 6, 6) };
+            var btnTest = NewButton("一键连通性测试");
+            btnTest.Click += RunConnectivityTest;
+            var btnClearLog = NewButton("清空日志");
+            btnClearLog.Click += delegate { txtProbeLog.Clear(); _probeLogOffset = File.Exists(ProxyProcessManager.ProbeLogPath) ? new FileInfo(ProxyProcessManager.ProbeLogPath).Length : 0; };
+            probePanel.Controls.Add(btnClearLog);
+            probePanel.Controls.Add(btnTest);
+            grpProbe.Controls.Add(txtProbeLog);
+            grpProbe.Controls.Add(probePanel);
+
+            lblResult = new Label { Location = new Point(12, 840), Size = new Size(640, 30), ForeColor = Color.DarkGreen };
             lblResult.Text = (ProxyProcessManager.IsRunning() ? "代理运行" : "代理未运行") +
                              "；Wintun.dll " + (HotspotManager.WintunAvailable() ? "存在" : "缺失") +
                              "；网络层归一化 " + (NetworkNormalizer.Shared.IsRunning ? "运行" : "未运行");
 
-            var panel = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 48, FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(8, 8, 8, 8) };
+            var panel = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 70, FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(8, 8, 8, 8) };
             var btnClose = NewButton("关闭");
             btnClose.Click += delegate { Close(); };
             var btnOpen = NewButton("打开配置文件");
@@ -172,8 +207,54 @@ namespace WifiHotspot
 
             Controls.Add(implemented);
             Controls.Add(missing);
+            Controls.Add(grpProbe);
             Controls.Add(lblResult);
             Controls.Add(panel);
+
+            probeTimer = new System.Windows.Forms.Timer { Interval = 800 };
+            probeTimer.Tick += delegate { RefreshProbeLog(false); };
+            RefreshProbeLog(true);
+            probeTimer.Start();
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing && probeTimer != null) probeTimer.Stop();
+            base.Dispose(disposing);
+        }
+
+        private void LoadUpstreamInterfaces(string selected)
+        {
+            var adapters = new IcsManager().GetNetworkAdapters();
+            foreach (IcsManager.NetworkAdapterInfo adapter in adapters)
+            {
+                if (adapter.IsActive && IsUsableUpstream(adapter) && !cmbTunUpstream.Items.Contains(adapter.Name))
+                    cmbTunUpstream.Items.Add(adapter.Name);
+            }
+            if (cmbTunUpstream.Items.Count == 0)
+            {
+                foreach (IcsManager.NetworkAdapterInfo adapter in adapters)
+                {
+                    if (IsUsableUpstream(adapter) && !cmbTunUpstream.Items.Contains(adapter.Name))
+                        cmbTunUpstream.Items.Add(adapter.Name);
+                }
+            }
+            if (!string.IsNullOrEmpty(selected) && !cmbTunUpstream.Items.Contains(selected))
+                cmbTunUpstream.Items.Insert(0, selected);
+            if (cmbTunUpstream.Items.Count == 0)
+                cmbTunUpstream.Items.Add("未检测到可用网卡");
+            string target = string.IsNullOrEmpty(selected) ? cmbTunUpstream.Items[0].ToString() : selected;
+            cmbTunUpstream.SelectedItem = target;
+        }
+
+        private static bool IsUsableUpstream(IcsManager.NetworkAdapterInfo adapter)
+        {
+            string text = (adapter.Name + " " + adapter.Description).ToLowerInvariant();
+            return !text.Contains("virtual") && !text.Contains("vmware") && !text.Contains("virtualbox") &&
+                   !text.Contains("hyper-v") && !text.Contains("vswitch") && !text.Contains("wsl") &&
+                   !text.Contains("docker") && !text.Contains("hosted network") && !text.Contains("loopback") &&
+                   !text.Contains("wan miniport") && !text.Contains("onenetshare") && !text.Contains("tap") &&
+                   !text.Contains("tun");
         }
 
         private void ApplyProfileTTL()
@@ -198,6 +279,200 @@ namespace WifiHotspot
             {
                 lblTtlHint.ForeColor = Color.DarkOrange;
                 lblTtlHint.Text = "注意：与 " + profile + " 推荐 TTL=" + recommended + " 不一致，可能暴露系统指纹";
+            }
+        }
+
+        private void RefreshProbeLog(bool reset)
+        {
+            string path = ProxyProcessManager.ProbeLogPath;
+            if (!File.Exists(path))
+            {
+                if (reset)
+                {
+                    txtProbeLog.Clear();
+                    _probeLogOffset = 0;
+                }
+                return;
+            }
+
+            using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+            {
+                if (reset || stream.Length < _probeLogOffset)
+                {
+                    txtProbeLog.Clear();
+                    _probeLogOffset = 0;
+                }
+                if (stream.Length <= _probeLogOffset) return;
+                stream.Seek(_probeLogOffset, SeekOrigin.Begin);
+                byte[] buffer = new byte[stream.Length - _probeLogOffset];
+                int read = 0;
+                while (read < buffer.Length)
+                {
+                    int count = stream.Read(buffer, read, buffer.Length - read);
+                    if (count == 0) break;
+                    read += count;
+                }
+                _probeLogOffset += read;
+                string text = Encoding.UTF8.GetString(buffer, 0, read);
+                foreach (string line in text.Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries))
+                {
+                    int marker = line.IndexOf("[probe]", StringComparison.OrdinalIgnoreCase);
+                    if (marker < 0) continue;
+                    string message = line.Substring(marker).Replace("[probe]", string.Empty).Trim();
+                    string clock = DateTime.Now.ToString("HH:mm:ss");
+                    if (line.Length >= 19)
+                    {
+                        DateTime parsed;
+                        if (DateTime.TryParse(line.Substring(0, 19), out parsed)) clock = parsed.ToString("HH:mm:ss");
+                    }
+                    AppendProbeLine("[" + clock + "] " + message);
+                }
+            }
+        }
+
+        private void AppendProbeLine(string line)
+        {
+            if (txtProbeLog.Lines.Length > 300)
+            {
+                string[] lines = txtProbeLog.Lines;
+                var keep = new List<string>();
+                for (int i = lines.Length - 250; i < lines.Length; i++) keep.Add(lines[i]);
+                txtProbeLog.Lines = keep.ToArray();
+            }
+            txtProbeLog.AppendText(line + Environment.NewLine);
+            txtProbeLog.SelectionStart = txtProbeLog.TextLength;
+            txtProbeLog.ScrollToCaret();
+        }
+
+        private void RunConnectivityTest(object sender, EventArgs e)
+        {
+            lblResult.Text = "连通性测试中...";
+            var thread = new Thread(new ThreadStart(delegate
+            {
+                string result = PerformConnectivityTest();
+                try
+                {
+                    BeginInvoke(new Action(delegate
+                    {
+                        lblResult.Text = result;
+                        AppendProbeLine("[测试] " + result);
+                    }));
+                }
+                catch { }
+            }));
+            thread.IsBackground = true;
+            thread.Start();
+        }
+
+        private string PerformConnectivityTest()
+        {
+            string http = TestHttpRewrite();
+            string tun = TestTunRoute();
+            bool httpOK = http.StartsWith("HTTP 改写生效", StringComparison.Ordinal);
+            bool tunOK = tun.StartsWith("TUN 路由正常", StringComparison.Ordinal) || tun.StartsWith("TUN 未开启", StringComparison.Ordinal);
+            return httpOK && tunOK
+                ? "全副武装，请放心冲浪；" + http + "；" + tun
+                : "仍需检查；" + http + "；" + tun;
+        }
+
+        private static string TestHttpRewrite()
+        {
+            if (!ProxyProcessManager.IsRunning()) return "HTTP 改写失败（代理未运行）";
+            string observed = null;
+            Exception failure = null;
+            HttpListener listener = null;
+            Thread listenerThread = null;
+            var done = new ManualResetEvent(false);
+            try
+            {
+                listener = new HttpListener();
+                listener.Prefixes.Add("http://127.0.0.1:18099/");
+                listener.Start();
+                listenerThread = new Thread(new ThreadStart(delegate
+                {
+                    try
+                    {
+                        HttpListenerContext context = listener.GetContext();
+                        observed = context.Request.Headers.ToString();
+                        context.Response.StatusCode = 204;
+                        context.Response.Close();
+                    }
+                    catch { }
+                    finally { done.Set(); }
+                }));
+                listenerThread.IsBackground = true;
+                listenerThread.Start();
+
+                var request = (HttpWebRequest)WebRequest.Create("http://127.0.0.1:18099/probe");
+                request.Proxy = new WebProxy("http://127.0.0.1:18080", false);
+                request.Method = "GET";
+                request.UserAgent = "OneNetShare-Unprobed/1.0";
+                request.Headers.Add("X-Forwarded-For", "203.0.113.9");
+                request.Headers.Add("Via", "1.1 unprobed");
+                request.Timeout = 5000;
+                request.ReadWriteTimeout = 5000;
+                using (HttpWebResponse response = (HttpWebResponse)request.GetResponse()) { }
+                done.WaitOne(3000);
+            }
+            catch (Exception ex)
+            {
+                failure = ex;
+            }
+            finally
+            {
+                if (listener != null) listener.Stop();
+                if (listenerThread != null && listenerThread.IsAlive) listenerThread.Join(500);
+                done.Close();
+            }
+            if (failure != null) return "HTTP 改写失败（" + failure.Message + "）";
+            if (string.IsNullOrEmpty(observed)) return "HTTP 改写失败（本地探针未收到请求）";
+            bool unrewritten = observed.IndexOf("OneNetShare-Unprobed", StringComparison.OrdinalIgnoreCase) >= 0;
+            bool leaked = observed.Contains("203.0.113.9") || observed.IndexOf("unprobed", StringComparison.OrdinalIgnoreCase) >= 0;
+            if (unrewritten || leaked) return "HTTP 改写失败（UA 未改写或泄露头未清除）";
+            return "HTTP 改写生效（UA 已替换，XFF/Via 已清除）";
+        }
+
+        private static string TestTunRoute()
+        {
+            ProxySettings settings = ProxyConfigManager.Load();
+            if (!settings.TunEnabled) return "TUN 未开启（跳过）";
+            string output = RunNetsh("interface ipv4 show route");
+            if (output.IndexOf("10.66.0.2", StringComparison.Ordinal) < 0)
+                return "TUN 路由异常（未发现经 10.66.0.2 的默认路由）";
+
+            bool adapterFound = false;
+            foreach (NetworkInterface nic in NetworkInterface.GetAllNetworkInterfaces())
+            {
+                foreach (UnicastIPAddressInformation address in nic.GetIPProperties().UnicastAddresses)
+                {
+                    if (address.Address.ToString() == "10.66.0.1") adapterFound = true;
+                }
+            }
+            return adapterFound ? "TUN 路由正常（默认路由经 10.66.0.2）" : "TUN 路由异常（未发现虚拟网卡地址 10.66.0.1）";
+        }
+
+        private static string RunNetsh(string arguments)
+        {
+            try
+            {
+                var psi = new ProcessStartInfo("netsh", arguments)
+                {
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    RedirectStandardOutput = true,
+                    StandardOutputEncoding = Encoding.UTF8
+                };
+                using (Process process = Process.Start(psi))
+                {
+                    if (process == null) return string.Empty;
+                    string output = process.StandardOutput.ReadToEnd();
+                    process.WaitForExit(5000);
+                    return output;
+                }
+            }
+            catch
+            {
+                return string.Empty;
             }
         }
 
@@ -243,13 +518,15 @@ namespace WifiHotspot
                 NetworkIPID = chkIPID.Checked,
                 NetworkTCPOptions = chkTcpOptions.Checked,
                 NetworkForward = chkForward.Checked,
+                MtuClampEnabled = chkMtuClamp.Checked,
+                MssClamp = (int)numMssClamp.Value,
                 TunEnabled = tun,
                 TunAdapter = txtTunAdapter.Text.Trim(),
                 TunIP = txtTunIP.Text.Trim(),
                 TunGatewayIP = txtTunGateway.Text.Trim(),
                 TunPrefixLen = (int)numPrefix.Value,
                 TunRoute = chkTunRoute.Checked,
-                TunUpstreamInterface = txtTunUpstream.Text.Trim(),
+                TunUpstreamInterface = cmbTunUpstream.SelectedItem == null ? string.Empty : cmbTunUpstream.SelectedItem.ToString(),
                 Mode = "forward",
                 Profile = cmbProfile.SelectedItem == null ? "chrome-win11" : cmbProfile.SelectedItem.ToString()
             };
@@ -260,6 +537,7 @@ namespace WifiHotspot
             if (!settings.TunEnabled) return string.Empty;
             if (!HotspotManager.WintunAvailable()) return "；未找到 wintun.dll，请放到程序目录";
             if (!HotspotManager.IsAdministrator()) return "；全局 TUN 接管需要管理员权限";
+            if (string.IsNullOrEmpty(settings.TunUpstreamInterface) || settings.TunUpstreamInterface == "未检测到可用网卡") return "；请先选择实际出口网卡";
             return string.Empty;
         }
 

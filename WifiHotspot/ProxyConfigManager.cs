@@ -23,6 +23,8 @@ namespace WifiHotspot
         public bool NetworkIPID { get; set; }
         public bool NetworkTCPOptions { get; set; }
         public bool NetworkForward { get; set; }
+        public bool MtuClampEnabled { get; set; }
+        public int MssClamp { get; set; }
         public bool TunEnabled { get; set; }
         public string TunAdapter { get; set; }
         public string TunIP { get; set; }
@@ -77,6 +79,8 @@ namespace WifiHotspot
                 NetworkIPID = GetBool(network, "ipid", true),
                 NetworkTCPOptions = GetBool(network, "tcp_options", true),
                 NetworkForward = GetBool(network, "forward", true),
+                MtuClampEnabled = GetBool(network, "mtu_clamp_enabled", false),
+                MssClamp = GetInt(network, "mss_clamp", 1460),
                 TunEnabled = GetBool(tun, "enabled", false),
                 TunAdapter = GetString(tun, "name", "OneNetShare Tunnel"),
                 TunIP = GetString(tun, "ip", "10.66.0.1"),
@@ -137,6 +141,8 @@ namespace WifiHotspot
             SetBool(network, "ipid", settings.NetworkIPID);
             SetBool(network, "tcp_options", settings.NetworkTCPOptions);
             SetBool(network, "forward", settings.NetworkForward);
+            SetBool(network, "mtu_clamp_enabled", settings.MtuClampEnabled);
+            SetInt(network, "mss_clamp", settings.MssClamp <= 0 ? 1460 : settings.MssClamp);
 
             IDictionary<string, object> tun = GetOrCreateDict(root, "tun");
             SetBool(tun, "enabled", settings.TunEnabled);
@@ -225,7 +231,7 @@ namespace WifiHotspot
   ""default_profile"": ""chrome-win11"",
   ""auto_reload"": true,
   ""gui_auto_start_proxy"": true,
-  ""network"": { ""enabled"": false, ""ttl"": 128, ""ipid"": true, ""tcp_options"": true, ""forward"": true },
+  ""network"": { ""enabled"": false, ""ttl"": 128, ""ipid"": true, ""tcp_options"": true, ""forward"": true, ""mtu_clamp_enabled"": false, ""mss_clamp"": 1460 },
   ""tun"": { ""enabled"": false, ""name"": ""OneNetShare Tunnel"", ""ip"": ""10.66.0.1"", ""gateway_ip"": ""10.66.0.2"", ""prefix_len"": 24, ""route"": true, ""upstream_interface"": """", ""ttl"": 128 },
   ""log"": { ""level"": ""info"", ""file"": "" },
   ""deviceforge"": {
