@@ -308,7 +308,7 @@ func interfaceByIP(ifaces []net.Interface, ip net.IP) (net.Interface, bool) {
 	return net.Interface{}, false
 }
 
-func nameArg(name string) string { return "name=\"" + name + "\"" }
+func nameArg(name string) string { return "name=" + name }
 
 func runNetsh(args ...string) error {
 	cmd := exec.Command("netsh", args...)

@@ -221,6 +221,8 @@ namespace WifiHotspot
                 lines.Add("[建议] 日志显示权限不足；请右键以管理员身份运行 WifiHotspot.exe，或关闭 Wintun/网络层归一化。");
             if (joined.IndexOf("wintun", StringComparison.OrdinalIgnoreCase) >= 0)
                 lines.Add("[建议] 日志包含 Wintun 相关错误；确认 wintun.dll 在程序目录、已选择物理出口网卡并以管理员运行。");
+            if (joined.IndexOf("无效源", StringComparison.Ordinal) >= 0 || joined.IndexOf("invalid source", StringComparison.OrdinalIgnoreCase) >= 0)
+                lines.Add("[建议] netsh 报告“无效源”参数，通常是带空格的 Wintun 适配器名未被正确引用；请升级到已修复该参数转义的最新版。");
             if (joined.IndexOf("config", StringComparison.OrdinalIgnoreCase) >= 0 ||
                 joined.IndexOf("json", StringComparison.OrdinalIgnoreCase) >= 0)
                 lines.Add("[建议] 日志包含配置相关错误；点击“仅保存”重建 config.json，再点“保存并重启代理”。");
