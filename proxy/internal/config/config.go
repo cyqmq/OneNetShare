@@ -16,6 +16,7 @@ type Config struct {
 	ListenHTTP        string             `json:"listen_http"`
 	ListenHTTPS       string             `json:"listen_https"`
 	DefaultProfile    string             `json:"default_profile"`
+	UAPreset          string             `json:"ua_preset,omitempty"`
 	UserAgentOverride string             `json:"user_agent_override,omitempty"`
 	Profiles          map[string]Profile `json:"profiles"`
 	Rules             []Rule             `json:"rules"`
@@ -276,7 +277,17 @@ func (l *Loader) applyDefaults(cfg *Config) {
 			cfg.Rules[i].Domains = []string{"*"}
 		}
 	}
-	if cfg.UserAgentOverride != "" {
+	if selected, ok := LookupUAPreset(cfg.UAPreset); ok {
+		p := cfg.Profiles[cfg.DefaultProfile]
+		if p.Headers == nil {
+			p.Headers = map[string]string{}
+		}
+		for key, value := range BuildHeaders(selected.Preset) {
+			p.Headers[key] = value
+		}
+		p.Description = selected.Label
+		cfg.Profiles[cfg.DefaultProfile] = p
+	} else if cfg.UserAgentOverride != "" {
 		p := cfg.Profiles[cfg.DefaultProfile]
 		if p.Headers == nil {
 			p.Headers = map[string]string{}

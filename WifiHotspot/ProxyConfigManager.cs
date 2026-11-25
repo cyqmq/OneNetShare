@@ -34,6 +34,7 @@ namespace WifiHotspot
         public string TunUpstreamInterface { get; set; }
         public string Mode { get; set; }
         public string Profile { get; set; }
+        public string UAPreset { get; set; }
         public string UserAgentOverride { get; set; }
     }
 
@@ -91,6 +92,7 @@ namespace WifiHotspot
                 TunUpstreamInterface = GetString(tun, "upstream_interface", ""),
                 Mode = GetString(root, "mode", "forward"),
                 Profile = profile,
+                UAPreset = GetString(root, "ua_preset", ""),
                 UserAgentOverride = GetString(root, "user_agent_override", "")
             };
         }
@@ -116,6 +118,26 @@ namespace WifiHotspot
             return profiles;
         }
 
+        public static Dictionary<string, string> GetUAPresets()
+        {
+            return new Dictionary<string, string>
+            {
+                { "chrome-158-windows", "Chrome 158 / Windows 11" },
+                { "chrome-158-macos", "Chrome 158 / macOS" },
+                { "chrome-158-linux", "Chrome 158 / Linux" },
+                { "chrome-158-android", "Chrome 158 / Android" },
+                { "chrome-158-ios", "Chrome 158 / iOS" },
+                { "edge-158-windows", "Edge 158 / Windows 11" },
+                { "firefox-148-windows", "Firefox 148 / Windows 11" },
+                { "firefox-148-macos", "Firefox 148 / macOS" },
+                { "firefox-148-linux", "Firefox 148 / Linux" },
+                { "firefox-148-android", "Firefox 148 / Android" },
+                { "safari-18-macos", "Safari 18 / macOS" },
+                { "safari-18-ios", "Safari 18 / iOS" },
+                { "curl-8.5-linux", "curl 8.5 / Linux" }
+            };
+        }
+
         public static int RecommendedTTL(string profile)
         {
             string name = (profile ?? string.Empty).ToLowerInvariant();
@@ -135,6 +157,7 @@ namespace WifiHotspot
             SetBool(root, "enabled", settings.Enabled);
             SetString(root, "mode", string.IsNullOrEmpty(settings.Mode) ? "forward" : settings.Mode);
             SetString(root, "default_profile", string.IsNullOrEmpty(settings.Profile) ? "chrome-win11" : settings.Profile);
+            SetString(root, "ua_preset", settings.UAPreset ?? "");
             SetString(root, "user_agent_override", settings.UserAgentOverride ?? "");
             SetBool(root, "gui_auto_start_proxy", settings.AutoStartProxy);
 
@@ -232,6 +255,7 @@ namespace WifiHotspot
   ""listen_http"": ""0.0.0.0:18080"",
   ""listen_https"": ""127.0.0.1:18443"",
   ""default_profile"": ""chrome-win11"",
+  ""ua_preset"": ""chrome-158-windows"",
   ""user_agent_override"": """",
   ""auto_reload"": true,
   ""gui_auto_start_proxy"": true,

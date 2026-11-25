@@ -42,7 +42,7 @@ namespace WifiHotspot
         private readonly TextBox txtTunGateway;
         private readonly ComboBox cmbTunUpstream;
         private readonly ComboBox cmbProfile;
-        private readonly TextBox txtUserAgent;
+        private readonly ComboBox cmbUaPreset;
         private readonly TextBox txtProbeLog;
         private readonly System.Windows.Forms.Timer probeTimer;
         private long _probeLogOffset;
@@ -111,9 +111,16 @@ namespace WifiHotspot
             txtTunGateway = NewText(settings.TunGatewayIP, 270, 364, 105);
             var lblPrefix = new Label { Location = new Point(395, 367), AutoSize = true, Text = "前缀:" };
             numPrefix = new NumericUpDown { Location = new Point(440, 364), Size = new Size(55, 23), Minimum = 8, Maximum = 30, Value = settings.TunPrefixLen <= 0 ? 24 : settings.TunPrefixLen };
-            var lblUserAgent = new Label { Location = new Point(15, 395), AutoSize = true, Text = "UA 覆盖:" };
-            txtUserAgent = NewText(settings.UserAgentOverride ?? "", 95, 392, 450);
-            var lblUserAgentHint = new Label { Location = new Point(550, 390), Size = new Size(85, 32), ForeColor = Color.Gray, Text = "留空使用预设，自动对齐 Client Hints" };
+            var lblUserAgent = new Label { Location = new Point(15, 395), AutoSize = true, Text = "UA 预设:" };
+            cmbUaPreset = new ComboBox { Location = new Point(95, 392), Size = new Size(450, 23), DropDownStyle = ComboBoxStyle.DropDownList };
+            var uaPresets = ProxyConfigManager.GetUAPresets();
+            var uaPresetList = new List<KeyValuePair<string, string>>();
+            foreach (KeyValuePair<string, string> item in uaPresets) uaPresetList.Add(item);
+            cmbUaPreset.DataSource = uaPresetList;
+            cmbUaPreset.DisplayMember = "Value";
+            cmbUaPreset.ValueMember = "Key";
+            cmbUaPreset.SelectedValue = uaPresets.ContainsKey(settings.UAPreset) ? settings.UAPreset : "chrome-158-windows";
+            var lblUserAgentHint = new Label { Location = new Point(550, 390), Size = new Size(85, 32), ForeColor = Color.Gray, Text = "内置 UA 库，自动对齐 Client Hints" };
 
             chkTun.CheckedChanged += delegate { chkNetwork.Enabled = !chkTun.Checked; };
             chkNetwork.Enabled = !settings.TunEnabled;
@@ -159,7 +166,7 @@ namespace WifiHotspot
             implemented.Controls.Add(lblPrefix);
             implemented.Controls.Add(numPrefix);
             implemented.Controls.Add(lblUserAgent);
-            implemented.Controls.Add(txtUserAgent);
+            implemented.Controls.Add(cmbUaPreset);
             implemented.Controls.Add(lblUserAgentHint);
             implemented.Controls.Add(note);
 
@@ -475,7 +482,7 @@ namespace WifiHotspot
             if (!string.IsNullOrEmpty(xff)) leaks.Add("X-Forwarded-For=" + xff);
             if (!string.IsNullOrEmpty(via)) leaks.Add("Via=" + via);
             if (unrewritten)
-                return "HTTP 改写失败（UA 仍是探针值；请确认已选预设或填写 UA 覆盖，并点“保存并重启代理”。当前 UA=" + Short(ua, 60) + "）";
+                return "HTTP 改写失败（UA 仍是探针值；请从“UA 预设”选择内置画像，并点“保存并重启代理”。当前 UA=" + Short(ua, 60) + "）";
             if (leaks.Count > 0)
                 return "HTTP 改写失败（泄露头未清除：" + string.Join("，", leaks.ToArray()) + "）";
             return "HTTP 改写生效（UA=" + Short(ua, 60) + "，XFF/Via 已清除）";
@@ -596,7 +603,8 @@ namespace WifiHotspot
                 TunUpstreamInterface = cmbTunUpstream.SelectedItem == null ? string.Empty : cmbTunUpstream.SelectedItem.ToString(),
                 Mode = "forward",
                 Profile = cmbProfile.SelectedItem == null ? "chrome-win11" : cmbProfile.SelectedItem.ToString(),
-                UserAgentOverride = txtUserAgent.Text.Trim()
+                UAPreset = cmbUaPreset.SelectedValue == null ? "" : cmbUaPreset.SelectedValue.ToString(),
+                UserAgentOverride = ""
             };
         }
 

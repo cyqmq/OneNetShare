@@ -26,7 +26,7 @@
 
 - 一键创建 WiFi 热点（优先 Windows 移动热点 API，失败回退 `netsh wlan hostednetwork`）
 - 自动诊断热点失败原因并给出可执行修改路径与设置入口
-- GUI 内置“代理功能”开关窗口，可编辑 HTTP Header/Captive/UDP/DNS/NTP/mDNS/DHCP 开关、设备指纹、UA 覆盖和随热点启停代理；UA/Client Hints/平台版本由同一画像生成，Firefox/Safari 不带 Chromium Hints；强制 TTL 随设备指纹自动填入推荐值（Windows 画像 128，Android/macOS/iOS/Linux 画像 64），手动改偏会提示；Wintun 模式强制从下拉列表选择真实物理出口网卡，过滤 VMware/Hyper-V/WSL 等虚拟网卡；未实现项在窗口内明确标注
+- GUI 内置“代理功能”开关窗口，可编辑 HTTP Header/Captive/UDP/DNS/NTP/mDNS/DHCP 开关、设备指纹和随热点启停代理；“UA 预设”下拉框提供内置 UA 库（Chrome/Edge/Firefox/Safari/curl），无需手输，UA/Client Hints/平台版本由同一画像生成，Firefox/Safari 不带 Chromium Hints；强制 TTL 随设备指纹自动填入推荐值（Windows 画像 128，Android/macOS/iOS/Linux 画像 64），手动改偏会提示；Wintun 模式强制从下拉列表选择真实物理出口网卡，过滤 VMware/Hyper-V/WSL 等虚拟网卡；未实现项在窗口内明确标注
 - MTU/MSS 钳制自动降级：WinDivert SYN MSS 与 Wintun 合成 SYN-ACK MSS 均可钳制到 1460/1360/1280，便于排查网站卡在 TLS 握手的问题
 - 探针日志面板实时滚动显示 Captive 拦截、DNS 规范化、未知 UDP 丢弃事件；一键连通性测试通过本地回显探针验证 HTTP Header 改写，并检查 TUN 默认路由状态
 - 代理自动诊断：启动失败时自动检查 `config.json`、端口格式/占用/Windows 保留端口范围、退出码、进程输出与 `probe.log`，给出端口/权限/文件/TUN 出口网卡等具体原因；代理功能窗口提供“自动诊断”按钮；自定义画像缺少 User-Agent 时自动回退内置 Chrome UA，`probe.log` 被代理占用时日志面板与诊断改为共享读

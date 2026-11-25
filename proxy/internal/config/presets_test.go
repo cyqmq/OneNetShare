@@ -42,6 +42,49 @@ func TestParseUserAgentOverrideRebuildsClientHints(t *testing.T) {
 	}
 }
 
+func TestUAPresetCatalogIsCoherent(t *testing.T) {
+	presets := UAPresets()
+	if len(presets) < 10 {
+		t.Fatalf("UA 预设数量不足: %d", len(presets))
+	}
+	seen := map[string]bool{}
+	for _, item := range presets {
+		if item.Name == "" || item.Label == "" {
+			t.Fatalf("预设缺少名称或标签: %+v", item)
+		}
+		if seen[item.Name] {
+			t.Fatalf("预设名称重复: %s", item.Name)
+		}
+		seen[item.Name] = true
+		headers := BuildHeaders(item.Preset)
+		if headers["User-Agent"] == "" {
+			t.Fatalf("预设没有 UA: %s", item.Name)
+		}
+		if item.Preset.Browser == "chrome" || item.Preset.Browser == "edge" {
+			major := strings.SplitN(item.Preset.Version, ".", 2)[0]
+			uaToken := "Chrome/" + major
+			if item.Preset.Platform == "iOS" {
+				uaToken = "CriOS/" + major
+			}
+			if !strings.Contains(headers["User-Agent"], uaToken) {
+				t.Fatalf("UA 与版本不一致: %s", item.Name)
+			}
+			if !strings.Contains(headers["sec-ch-ua"], `;v="`+major+`"`) {
+				t.Fatalf("Client Hints 与版本不一致: %s", item.Name)
+			}
+		} else {
+			for key := range headers {
+				if strings.HasPrefix(strings.ToLower(key), "sec-ch-ua") {
+					t.Fatalf("非 Chromium 预设不应有 Client Hints: %s", item.Name)
+				}
+			}
+		}
+	}
+	if _, ok := LookupUAPreset("chrome-158-windows"); !ok {
+		t.Fatal("默认 UA 预设不存在")
+	}
+}
+
 func TestNonChromiumUARemovesClientHints(t *testing.T) {
 	ua := "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:148.0) Gecko/20100101 Firefox/148.0"
 	preset, ok := ParseUserAgent(ua)
