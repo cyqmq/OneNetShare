@@ -1,7 +1,7 @@
 package config
 
 func BuiltinProfiles() map[string]Profile {
-	return map[string]Profile{
+	profiles := map[string]Profile{
 		"chrome-win11": {
 			Description: "Chrome 131 / Windows 11 x64",
 			Headers: map[string]string{
@@ -107,4 +107,7 @@ func BuiltinProfiles() map[string]Profile {
 			},
 		},
 	}
+	profiles["mobile-android"] = profiles["chrome-android"]
+	profiles["mobile-ios"] = profiles["safari-ios"]
+	return profiles
 }

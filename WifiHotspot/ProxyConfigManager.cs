@@ -96,7 +96,7 @@ namespace WifiHotspot
         public static List<string> GetProfiles(string path = null)
         {
             string configPath = string.IsNullOrEmpty(path) ? DefaultConfigPath : path;
-            var profiles = new List<string> { "chrome-win11", "chrome-win10", "firefox-win11", "safari-macos", "mobile-android", "mobile-ios" };
+            var profiles = new List<string> { "chrome-win11", "chrome-win10", "edge-win11", "chrome-android", "safari-ios", "safari-macos", "firefox-win11", "curl-linux", "mobile-android", "mobile-ios" };
             if (!File.Exists(configPath)) return profiles;
 
             try

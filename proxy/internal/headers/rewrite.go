@@ -161,6 +161,8 @@ func (e *Engine) Rewrite(req *Request, originalDst string) (string, string, erro
 	if !applied {
 		if p, ok := cfg.Profiles[cfg.DefaultProfile]; ok {
 			headers = setHeaders(headers, p.Headers)
+		} else if p, ok := config.BuiltinProfiles()["chrome-win11"]; ok {
+			headers = setHeaders(headers, p.Headers)
 		}
 	}
 
