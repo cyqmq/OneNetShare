@@ -7,6 +7,7 @@
   "default_profile": "chrome-win11",
   "ua_preset": "chrome-158-windows",
   "user_agent_override": "",
+  "ipv6_policy": "block",
   "auto_reload": true,
   "network": {
     "enabled": false,
