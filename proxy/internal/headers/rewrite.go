@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"hotspot-proxy/internal/config"
+	"hotspot-proxy/internal/monitor"
 )
 
 type Header struct {
@@ -107,10 +108,19 @@ func splitHostPort(hostport string) (string, string, error) {
 }
 
 type Engine struct {
-	loader *config.Loader
+	loader  *config.Loader
+	monitor *monitor.Tracker
 }
 
-func NewEngine(loader *config.Loader) *Engine { return &Engine{loader: loader} }
+func NewEngine(loader *config.Loader, trackers ...*monitor.Tracker) *Engine {
+	engine := &Engine{loader: loader}
+	if len(trackers) > 0 {
+		engine.monitor = trackers[0]
+	}
+	return engine
+}
+
+func (e *Engine) SetMonitor(tracker *monitor.Tracker) { e.monitor = tracker }
 
 func originalRequest(req *Request) string {
 	var sb strings.Builder
@@ -123,8 +133,19 @@ func originalRequest(req *Request) string {
 }
 
 func (e *Engine) Rewrite(req *Request, originalDst string) (string, string, error) {
+	return e.RewriteWithClient(req, originalDst, "")
+}
+
+func (e *Engine) RewriteWithClient(req *Request, originalDst, client string) (string, string, error) {
 	cfg := e.loader.Get()
+	originalUA, _ := headerValueFromHeaders(req.Headers, "User-Agent")
+	recordUA := func(effective string) {
+		if e.monitor != nil {
+			e.monitor.RecordUA(client, req.Host, originalUA, effective)
+		}
+	}
 	if !cfg.Enabled || !cfg.DeviceForge.Enabled || !cfg.DeviceForge.Headers {
+		recordUA(originalUA)
 		return req.Proto, originalRequest(req), nil
 	}
 
@@ -221,6 +242,8 @@ func (e *Engine) Rewrite(req *Request, originalDst string) (string, string, erro
 		sb.WriteString(h.Key + ": " + h.Value + "\r\n")
 	}
 	sb.WriteString("\r\n")
+	effectiveUA, _ := headerValueFromHeaders(headers, "User-Agent")
+	recordUA(effectiveUA)
 	return req.Proto, sb.String(), nil
 }
 
@@ -269,6 +292,15 @@ func isCaptiveProbe(req *Request, cfg *config.Config) bool {
 		}
 	}
 	return false
+}
+
+func headerValueFromHeaders(headers []Header, name string) (string, bool) {
+	for _, header := range headers {
+		if strings.EqualFold(header.Key, name) && header.Value != "" {
+			return header.Value, true
+		}
+	}
+	return "", false
 }
 
 func headerValue(values map[string]string, name string) (string, bool) {

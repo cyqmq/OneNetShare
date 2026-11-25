@@ -10,8 +10,9 @@ import (
 )
 
 type httpStreamRewriter struct {
-	engine *headers.Engine
-	buf    []byte
+	engine   *headers.Engine
+	clientIP string
+	buf      []byte
 }
 
 func (r *httpStreamRewriter) Rewrite(p []byte) ([]byte, error) {
@@ -61,7 +62,7 @@ func (r *httpStreamRewriter) rewriteHeader(header []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	_, rewritten, err := r.engine.Rewrite(req, "")
+	_, rewritten, err := r.engine.RewriteWithClient(req, "", r.clientIP)
 	if err != nil {
 		return nil, err
 	}

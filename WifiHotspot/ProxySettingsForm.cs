@@ -54,6 +54,11 @@ namespace WifiHotspot
         private readonly CheckBox chkPortalBlock;
         private readonly TextBox txtPortalPrimary;
         private readonly TextBox txtPortalSecondary;
+        private readonly CheckBox chkMonitorEnabled;
+        private readonly CheckBox chkMonitorTtl;
+        private readonly CheckBox chkMonitorUa;
+        private readonly CheckBox chkMonitorTls;
+        private readonly Label lblMonitorStatus;
         private readonly TextBox txtProbeLog;
         private readonly System.Windows.Forms.Timer probeTimer;
         private long _probeLogOffset;
@@ -73,9 +78,10 @@ namespace WifiHotspot
             ClientSize = new Size(680, 760);
             Font = new Font("Microsoft YaHei", 9F, FontStyle.Regular, GraphicsUnit.Point, 134);
 
-            var content = new Panel { Dock = DockStyle.Fill, AutoScroll = true, AutoScrollMinSize = new Size(0, 940) };
+            var content = new Panel { Dock = DockStyle.Fill, AutoScroll = true, AutoScrollMinSize = new Size(0, 1080) };
             var implemented = new GroupBox { Text = "已实现功能", Location = new Point(12, 12), Size = new Size(640, 520) };
-            var missing = new GroupBox { Text = "未实现功能", Location = new Point(12, 540), Size = new Size(640, 100) };
+            var monitorGroup = new GroupBox { Text = "核心监控（只读，不改包）", Location = new Point(12, 540), Size = new Size(640, 100) };
+            var missing = new GroupBox { Text = "未实现功能", Location = new Point(12, 650), Size = new Size(640, 100) };
             var note = new Label { Location = new Point(15, 487), Size = new Size(600, 30), ForeColor = Color.Gray };
             note.Text = "Wintun 全局 TUN 接管开启后，UDP/DNS/NTP 经虚拟网卡进入代理；HTTP Header 仍需代理转发。TUN 与 WinDivert 网络层归一化互斥。TTL 会随设备指纹自动填入推荐值。";
 
@@ -157,6 +163,25 @@ namespace WifiHotspot
             var lblPortalSecondary = new Label { Location = new Point(460, 453), AutoSize = true, Text = "备IP:" };
             txtPortalSecondary = NewText(settings.PortalSecondaryIP, 500, 450, 120);
 
+            chkMonitorEnabled = NewCheck("核心监控总开关", settings.MonitorEnabled, 15, 24);
+            chkMonitorTtl = NewCheck("TTL 跳数变化 (WinDivert sniff)", settings.MonitorTtl, 155, 24);
+            chkMonitorUa = NewCheck("HTTP UA 记录/分析", settings.MonitorUa, 370, 24);
+            chkMonitorTls = NewCheck("TLS SNI/JA3 记录", settings.MonitorTls, 510, 24);
+            var btnToggleMonitor = NewButton("启动/停止监控", 108);
+            btnToggleMonitor.Location = new Point(510, 55);
+            btnToggleMonitor.Click += ToggleMonitor;
+            lblMonitorStatus = new Label { Location = new Point(15, 58), Size = new Size(475, 30), ForeColor = Color.DarkBlue };
+            Action updateMonitorControls = delegate
+            {
+                bool enabled = chkMonitorEnabled.Checked;
+                chkMonitorTtl.Enabled = enabled;
+                chkMonitorUa.Enabled = enabled;
+                chkMonitorTls.Enabled = enabled;
+                btnToggleMonitor.Enabled = enabled;
+            };
+            chkMonitorEnabled.CheckedChanged += delegate { updateMonitorControls(); };
+            updateMonitorControls();
+
             chkTun.CheckedChanged += delegate { chkNetwork.Enabled = !chkTun.Checked; };
             chkNetwork.Enabled = !settings.TunEnabled;
             chkIpv6Guard.CheckedChanged += delegate { cmbIpv6Policy.Enabled = chkIpv6Guard.Checked; };
@@ -231,13 +256,20 @@ namespace WifiHotspot
             chkStun.Enabled = false;
             chkTls.Enabled = false;
             var missingNote = new Label { Location = new Point(15, 72), Size = new Size(600, 26), ForeColor = Color.Gray };
-            missingNote.Text = "HTTPS 当前是 TCP 透传，不做 MITM，无法改写 SDP 或 ClientHello；STUN 目前只转发 UDP，不解析/重算 MESSAGE-INTEGRITY。";
+            missingNote.Text = "HTTPS 当前是 TCP 透传，不做 MITM；核心监控只被动记录 ClientHello SNI/JA3，不改写 SDP/ClientHello。STUN 仅转发 UDP。";
             missing.Controls.Add(chkWebRtc);
             missing.Controls.Add(chkStun);
             missing.Controls.Add(chkTls);
             missing.Controls.Add(missingNote);
 
-            var grpProbe = new GroupBox { Text = "探针日志 / 连通性测试", Location = new Point(12, 643), Size = new Size(640, 250) };
+            monitorGroup.Controls.Add(chkMonitorEnabled);
+            monitorGroup.Controls.Add(chkMonitorTtl);
+            monitorGroup.Controls.Add(chkMonitorUa);
+            monitorGroup.Controls.Add(chkMonitorTls);
+            monitorGroup.Controls.Add(lblMonitorStatus);
+            monitorGroup.Controls.Add(btnToggleMonitor);
+
+            var grpProbe = new GroupBox { Text = "探针日志 / 连通性测试", Location = new Point(12, 760), Size = new Size(640, 250) };
             txtProbeLog = new TextBox { Multiline = true, ReadOnly = true, Dock = DockStyle.Fill, ScrollBars = ScrollBars.Vertical, BackColor = Color.White, Font = new Font("Consolas", 9F) };
             var probePanel = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 44, FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(6, 6, 6, 6) };
             var btnTest = NewButton("一键连通性测试", 150);
@@ -252,12 +284,14 @@ namespace WifiHotspot
             grpProbe.Controls.Add(txtProbeLog);
             grpProbe.Controls.Add(probePanel);
 
-            lblResult = new Label { Location = new Point(12, 900), Size = new Size(640, 30), ForeColor = Color.DarkGreen };
+            lblResult = new Label { Location = new Point(12, 1020), Size = new Size(640, 30), ForeColor = Color.DarkGreen };
             lblResult.Text = (ProxyProcessManager.IsRunning() ? "代理运行" : "代理未运行") +
                              "；Wintun.dll " + (HotspotManager.WintunAvailable() ? "存在" : "缺失") +
                              "；网络层归一化 " + (NetworkNormalizer.Shared.IsRunning ? "运行" : "未运行（" + NetworkNormalizer.Shared.LastMessage + "）") +
                              "；IPv6 封禁 " + (!settings.IPv6GuardEnabled ? "已关闭" : (IPv6Guard.IsRunning ? "运行" : "未运行")) +
-                             "；Portal " + (PortalGuard.IsRunning ? "运行" : "未运行");
+                             "；Portal " + (PortalGuard.IsRunning ? "运行" : "未运行") +
+                             "；TTL 监控 " + TrafficMonitor.Shared.StatusText;
+            lblMonitorStatus.Text = "代理侧 HTTP UA / TLS SNI+JA3 随代理进程启用；TTL 监控 " + TrafficMonitor.Shared.StatusText;
 
             var panel = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 48, FlowDirection = FlowDirection.RightToLeft, WrapContents = false, Padding = new Padding(8, 8, 8, 8) };
             var btnClose = NewButton("关闭");
@@ -280,6 +314,7 @@ namespace WifiHotspot
             panel.Controls.Add(btnSaveRestart);
 
             content.Controls.Add(implemented);
+            content.Controls.Add(monitorGroup);
             content.Controls.Add(missing);
             content.Controls.Add(grpProbe);
             content.Controls.Add(lblResult);
@@ -777,7 +812,11 @@ namespace WifiHotspot
                 IPv6GuardEnabled = chkIpv6Guard.Checked,
                 PortalBlockEnabled = chkPortalBlock.Checked,
                 PortalPrimaryIP = txtPortalPrimary.Text.Trim(),
-                PortalSecondaryIP = txtPortalSecondary.Text.Trim()
+                PortalSecondaryIP = txtPortalSecondary.Text.Trim(),
+                MonitorEnabled = chkMonitorEnabled.Checked,
+                MonitorTtl = chkMonitorTtl.Checked,
+                MonitorUa = chkMonitorUa.Checked,
+                MonitorTls = chkMonitorTls.Checked
             };
         }
 
@@ -794,7 +833,8 @@ namespace WifiHotspot
         {
             ProxySettings settings = Collect();
             ProxyConfigManager.Save(settings, _configPath);
-            lblResult.Text = "配置已保存。" + ApplyNetwork(settings) + "；" + ApplyIPv6Guard(settings) + TuneWarning(settings);
+            lblResult.Text = "配置已保存。" + ApplyNetwork(settings) + "；" + ApplyIPv6Guard(settings) + "；" + ApplyMonitor(settings) + TuneWarning(settings);
+            lblMonitorStatus.Text = "代理侧 HTTP UA / TLS SNI+JA3 随代理进程启用；TTL 监控 " + TrafficMonitor.Shared.StatusText;
         }
 
         private void SaveAndRestart(object sender, EventArgs e)
@@ -802,7 +842,8 @@ namespace WifiHotspot
             ProxySettings settings = Collect();
             ProxyConfigManager.Save(settings, _configPath);
             string result = ProxyProcessManager.IsRunning() ? ProxyProcessManager.Stop() + "；" + ProxyProcessManager.Start(_configPath) : ProxyProcessManager.Start(_configPath);
-            lblResult.Text = result + "；" + ApplyNetwork(settings) + "；" + ApplyIPv6Guard(settings) + TuneWarning(settings);
+            lblResult.Text = result + "；" + ApplyNetwork(settings) + "；" + ApplyIPv6Guard(settings) + "；" + ApplyMonitor(settings) + TuneWarning(settings);
+            lblMonitorStatus.Text = "代理侧 HTTP UA / TLS SNI+JA3 随代理进程启用；TTL 监控 " + TrafficMonitor.Shared.StatusText;
             ShowProxyDiagnosticIfNeeded();
         }
 
@@ -845,6 +886,12 @@ namespace WifiHotspot
             lblResult.Text = NetworkNormalizer.Shared.IsRunning ? NetworkNormalizer.Shared.Stop().Message : ApplyNetwork(Collect());
         }
 
+        private void ToggleMonitor(object sender, EventArgs e)
+        {
+            lblResult.Text = TrafficMonitor.Shared.IsRunning ? TrafficMonitor.Shared.Stop().Message : ApplyMonitor(Collect());
+            lblMonitorStatus.Text = "代理侧 HTTP UA / TLS SNI+JA3 随代理进程启用；TTL 监控 " + TrafficMonitor.Shared.StatusText;
+        }
+
         private static string ApplyNetwork(ProxySettings settings)
         {
             return settings.TunEnabled ? string.Empty : (settings.NetworkEnabled ? NetworkNormalizer.Shared.Start(settings).Message : NetworkNormalizer.Shared.Stop().Message);
@@ -855,6 +902,12 @@ namespace WifiHotspot
             if (!settings.IPv6GuardEnabled) return IPv6Guard.Stop().Message;
             if (ProxyDiagnostics.FindHotspotGlobalIPv6().Count == 0) return "IPv6 封禁已启用（当前无公网 IPv6，不启动）";
             return IPv6Guard.Start(settings.IPv6Policy).Message;
+        }
+
+        private static string ApplyMonitor(ProxySettings settings)
+        {
+            if (!settings.MonitorEnabled || !settings.MonitorTtl) return TrafficMonitor.Shared.Stop().Message;
+            return TrafficMonitor.Shared.Start(settings).Message;
         }
 
         private void OpenConfig(object sender, EventArgs e)

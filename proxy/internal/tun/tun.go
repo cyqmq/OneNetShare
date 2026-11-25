@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"hotspot-proxy/internal/headers"
+	"hotspot-proxy/internal/monitor"
 	"hotspot-proxy/internal/netutil"
 )
 
@@ -43,19 +44,21 @@ type Options struct {
 }
 
 type connection struct {
-	key        string
-	clientIP   net.IP
-	clientPort uint16
-	dstIP      net.IP
-	dstPort    uint16
-	seq        uint32
-	ack        uint32
-	stateMu    sync.Mutex
-	upstream   net.Conn
-	http       *httpStreamRewriter
-	httpMu     sync.Mutex
-	lastSeen   time.Time
-	closed     bool
+	key          string
+	clientIP     net.IP
+	clientPort   uint16
+	dstIP        net.IP
+	dstPort      uint16
+	seq          uint32
+	ack          uint32
+	stateMu      sync.Mutex
+	upstream     net.Conn
+	http         *httpStreamRewriter
+	httpMu       sync.Mutex
+	lastSeen     time.Time
+	closed       bool
+	tlsInspected bool
+	tlsBuf       []byte
 }
 
 type UDPHandler func(srcIP net.IP, srcPort uint16, dstIP net.IP, dstPort uint16, payload []byte)
@@ -68,6 +71,7 @@ type Device struct {
 	recentOutbound sync.Map
 	udpHandler     UDPHandler
 	httpEngine     *headers.Engine
+	monitor        *monitor.Tracker
 	ipid           uint16
 	ttl            byte
 	mss            int
@@ -102,6 +106,8 @@ func (d *Device) LocalIP() net.IP { return d.tunIP }
 func (d *Device) SetUDPHandler(h UDPHandler) { d.udpHandler = h }
 
 func (d *Device) SetHTTPEngine(engine *headers.Engine) { d.httpEngine = engine }
+
+func (d *Device) SetMonitor(tracker *monitor.Tracker) { d.monitor = tracker }
 
 func (d *Device) SetTTL(ttl int) {
 	if ttl < 1 || ttl > 255 {
@@ -344,6 +350,10 @@ func (d *Device) handlePacket(pkt []byte) {
 	c := val.(*connection)
 	c.lastSeen = time.Now()
 
+	if dstPort == 443 && !c.tlsInspected && d.monitor != nil {
+		d.inspectTLS(c, payload, dstIP, dstPort)
+	}
+
 	if flags&rstFlag != 0 || flags&finFlag != 0 {
 		d.closeConnection(c, key)
 		return
@@ -357,7 +367,7 @@ func (d *Device) handlePacket(pkt []byte) {
 		if dstPort == 80 && d.httpEngine != nil {
 			c.httpMu.Lock()
 			if c.http == nil {
-				c.http = &httpStreamRewriter{engine: d.httpEngine}
+				c.http = &httpStreamRewriter{engine: d.httpEngine, clientIP: c.clientIP.String()}
 			}
 			rewritten, err := c.http.Rewrite(payload)
 			c.httpMu.Unlock()
@@ -376,6 +386,30 @@ func (d *Device) handlePacket(pkt []byte) {
 		nextSeq := c.seq
 		c.stateMu.Unlock()
 		d.sendPacket(srcIP, srcPort, dstIP, dstPort, nextSeq, ack, ackFlag, nil)
+	}
+}
+
+func (d *Device) inspectTLS(c *connection, payload []byte, dstIP net.IP, dstPort uint16) {
+	if len(payload) == 0 {
+		return
+	}
+	if len(c.tlsBuf) == 0 && payload[0] != 0x16 {
+		c.tlsInspected = true
+		return
+	}
+	if len(c.tlsBuf) < 32768 {
+		c.tlsBuf = append(c.tlsBuf, payload...)
+	}
+	hello, ok := monitor.ParseClientHello(c.tlsBuf)
+	if ok {
+		d.monitor.RecordTLS(c.clientIP.String(), fmt.Sprintf("%s:%d", dstIP, dstPort), hello.SNI, hello.JA3)
+		c.tlsInspected = true
+		c.tlsBuf = nil
+		return
+	}
+	if len(c.tlsBuf) >= 32768 {
+		c.tlsInspected = true
+		c.tlsBuf = nil
 	}
 }
 
@@ -438,6 +472,9 @@ func (d *Device) closeConnection(c *connection, key string) {
 	c.closed = true
 	seq, ack := c.seq, c.ack
 	c.stateMu.Unlock()
+	if d.monitor != nil {
+		d.monitor.RecordClose(c.clientIP.String())
+	}
 	d.conns.Delete(key)
 	if c.upstream != nil {
 		c.upstream.Close()

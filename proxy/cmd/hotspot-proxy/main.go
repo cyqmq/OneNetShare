@@ -16,6 +16,7 @@ import (
 	"hotspot-proxy/internal/config"
 	"hotspot-proxy/internal/deviceforge"
 	"hotspot-proxy/internal/headers"
+	"hotspot-proxy/internal/monitor"
 	"hotspot-proxy/internal/proxy"
 	"hotspot-proxy/internal/tun"
 	"hotspot-proxy/internal/version"
@@ -66,6 +67,7 @@ func main() {
 		logger.Fatalf("配置错误: %v", err)
 	}
 	forge = deviceforge.NewManager(loader, logger)
+	tracker := monitor.New(logger, func() bool { return loader.Get().Monitor.IsEnabled() })
 
 	cfg := loader.Get()
 
@@ -75,7 +77,8 @@ func main() {
 			logger.Fatalf("TUN 初始化失败: %v", err)
 		}
 		tunDev.SetTTL(cfg.TUN.TTL)
-		tunDev.SetHTTPEngine(headers.NewEngine(loader))
+		tunDev.SetHTTPEngine(headers.NewEngine(loader, tracker))
+		tunDev.SetMonitor(tracker)
 		if cfg.Network.MtuClamp {
 			tunDev.SetMSS(cfg.Network.MssClamp)
 		}
@@ -100,7 +103,7 @@ func main() {
 			forge.Reload(cfg)
 		}
 
-		proxyServer := proxy.NewServer(loader, logger)
+		proxyServer := proxy.NewServer(loader, logger, tracker)
 		go func() {
 			if err := proxyServer.Run(cfg.ListenHTTP); err != nil {
 				logger.Printf("HTTP 代理启动失败: %v", err)
@@ -110,7 +113,7 @@ func main() {
 		stopCh := make(chan struct{})
 		var stopOnce sync.Once
 		stop := func() { stopOnce.Do(func() { close(stopCh) }) }
-		go startStatusServer(loader, logger, stop)
+		go startStatusServer(loader, logger, stop, tracker)
 		go func() {
 			if err := tunDev.Run(); err != nil {
 				logger.Printf("TUN 运行错误: %v", err)
@@ -148,7 +151,7 @@ func main() {
 		}
 	}
 
-	srv := proxy.NewServer(loader, logger)
+	srv := proxy.NewServer(loader, logger, tracker)
 
 	if cfg.Mode == "forward" && cfg.ListenHTTPS == "" {
 		cfg.ListenHTTPS = "127.0.0.1:18443"
@@ -170,7 +173,7 @@ func main() {
 	stopCh := make(chan struct{})
 	var stopOnce sync.Once
 	stop := func() { stopOnce.Do(func() { close(stopCh) }) }
-	go startStatusServer(loader, logger, stop)
+	go startStatusServer(loader, logger, stop, tracker)
 
 	logger.Printf("%s 启动完成 (http=%s https=%s mode=%s)",
 		version.String(), cfg.ListenHTTP, cfg.ListenHTTPS, cfg.Mode)
@@ -209,7 +212,7 @@ func startReloadWatcher(loader *config.Loader, logger *log.Logger) {
 	}
 }
 
-func startStatusServer(loader *config.Loader, logger *log.Logger, stop func()) {
+func startStatusServer(loader *config.Loader, logger *log.Logger, stop func(), tracker *monitor.Tracker) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/status", func(w http.ResponseWriter, r *http.Request) {
 		cfg := loader.Get()
@@ -223,6 +226,10 @@ func startStatusServer(loader *config.Loader, logger *log.Logger, stop func()) {
 			cfg.DeviceForge.DNS.Enabled, cfg.DeviceForge.NTP.Enabled,
 			cfg.DeviceForge.MDNS.Enabled, cfg.DeviceForge.DHCP.Enabled,
 			cfg.DeviceForge.Captive.Enabled, cfg.DeviceForge.Captive.Mode, cfg.DeviceForge.Headers)
+		stats := tracker.Stats()
+		fmt.Fprintf(w, "monitor=%v/%v/%v/%v ua_phone=%d ua_desktop=%d tls=%d alerts=%d\n",
+			cfg.Monitor.IsEnabled(), cfg.Monitor.IsTTL(), cfg.Monitor.IsUA(), cfg.Monitor.IsTLS(),
+			stats.Phone, stats.Desktop, stats.TLS, stats.Alerts)
 	})
 	mux.HandleFunc("/reload", func(w http.ResponseWriter, r *http.Request) {
 		if err := loader.Reload(); err != nil {

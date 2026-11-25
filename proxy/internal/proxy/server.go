@@ -13,6 +13,7 @@ import (
 
 	"hotspot-proxy/internal/config"
 	"hotspot-proxy/internal/headers"
+	"hotspot-proxy/internal/monitor"
 	"hotspot-proxy/internal/netutil"
 	"hotspot-proxy/internal/redirect"
 )
@@ -24,14 +25,20 @@ type Server struct {
 	listener net.Listener
 	wg       sync.WaitGroup
 	quit     chan struct{}
+	monitor  *monitor.Tracker
 }
 
-func NewServer(loader *config.Loader, logger *log.Logger) *Server {
+func NewServer(loader *config.Loader, logger *log.Logger, trackers ...*monitor.Tracker) *Server {
+	tracker := monitor.New(logger, func() bool { return loader.Get().Monitor.IsEnabled() })
+	if len(trackers) > 0 && trackers[0] != nil {
+		tracker = trackers[0]
+	}
 	return &Server{
-		loader: loader,
-		engine: headers.NewEngine(loader),
-		logger: logger,
-		quit:   make(chan struct{}),
+		loader:  loader,
+		engine:  headers.NewEngine(loader, tracker),
+		logger:  logger,
+		quit:    make(chan struct{}),
+		monitor: tracker,
 	}
 }
 
@@ -145,6 +152,9 @@ func (s *Server) acceptLoop(ln net.Listener, kind string) {
 func (s *Server) handle(client *net.TCPConn, kind string) {
 	client.SetNoDelay(true)
 	cfg := s.loader.Get()
+	if s.monitor != nil {
+		defer s.monitor.RecordClose(client.RemoteAddr().String())
+	}
 
 	var dst string
 	if cfg.Mode == "forward" {
@@ -221,11 +231,16 @@ func (s *Server) handleTunnel(client *net.TCPConn, dst string) {
 	}
 	defer target.Close()
 
+	reader := bufio.NewReaderSize(client, 32768)
+	if s.monitor != nil {
+		s.monitor.InspectTLS(client, reader, client.RemoteAddr().String(), dst)
+	}
+
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		io.Copy(target, client)
+		io.Copy(target, reader)
 		if c, ok := target.(*net.TCPConn); ok {
 			c.CloseWrite()
 		}
@@ -245,7 +260,7 @@ func (s *Server) handleTransparentHTTP(client *net.TCPConn, dst string) {
 		return
 	}
 
-	_, rewritten, err := s.engine.Rewrite(req, dst)
+	_, rewritten, err := s.engine.RewriteWithClient(req, dst, client.RemoteAddr().String())
 	if err != nil {
 		s.logger.Printf("[http] rewrite: %v", err)
 		return
@@ -328,7 +343,7 @@ func (s *Server) handleForwardHTTP(client *net.TCPConn) {
 	}
 	dst := net.JoinHostPort(host, port)
 
-	_, rewritten, err := s.engine.Rewrite(req, dst)
+	_, rewritten, err := s.engine.RewriteWithClient(req, dst, client.RemoteAddr().String())
 	if err != nil {
 		s.logger.Printf("[forward] rewrite: %v", err)
 		return
@@ -417,6 +432,9 @@ func (s *Server) relayConnect(client *net.TCPConn, reader *bufio.Reader, dst str
 	}
 	defer target.Close()
 	io.WriteString(client, "HTTP/1.1 200 Connection Established\r\n\r\n")
+	if s.monitor != nil {
+		s.monitor.InspectTLS(client, reader, client.RemoteAddr().String(), dst)
+	}
 
 	var wg sync.WaitGroup
 	wg.Add(2)

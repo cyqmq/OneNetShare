@@ -27,6 +27,26 @@ type Config struct {
 	Network           NetworkConfig      `json:"network"`
 	TUN               TUNConfig          `json:"tun"`
 	DeviceForge       DeviceForgeConfig  `json:"deviceforge"`
+	Monitor           MonitorConfig      `json:"monitor"`
+}
+
+type MonitorConfig struct {
+	Enabled *bool `json:"enabled,omitempty"`
+	TTL     *bool `json:"ttl,omitempty"`
+	UA      *bool `json:"ua,omitempty"`
+	TLS     *bool `json:"tls,omitempty"`
+}
+
+func (c MonitorConfig) IsEnabled() bool { return boolOr(c.Enabled, true) }
+func (c MonitorConfig) IsTTL() bool     { return c.IsEnabled() && boolOr(c.TTL, true) }
+func (c MonitorConfig) IsUA() bool      { return c.IsEnabled() && boolOr(c.UA, true) }
+func (c MonitorConfig) IsTLS() bool     { return c.IsEnabled() && boolOr(c.TLS, true) }
+
+func boolOr(value *bool, fallback bool) bool {
+	if value == nil {
+		return fallback
+	}
+	return *value
 }
 
 type NetworkConfig struct {
@@ -385,6 +405,7 @@ func DefaultJSON() string {
     "upstream_interface": "",
     "ttl": 128
   },
+  "monitor": {"enabled": true, "ttl": true, "ua": true, "tls": true},
   "deviceforge": {
     "enabled": true,
     "target_os": "windows-11",

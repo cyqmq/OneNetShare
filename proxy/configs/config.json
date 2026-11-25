@@ -10,6 +10,12 @@
   "ipv6_policy": "block",
   "ipv6_guard_enabled": true,
   "auto_reload": true,
+  "monitor": {
+    "enabled": true,
+    "ttl": true,
+    "ua": true,
+    "tls": true
+  },
   "network": {
     "enabled": false,
     "ttl": 128,

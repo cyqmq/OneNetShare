@@ -46,6 +46,10 @@ namespace WifiHotspot
         public bool PortalBlockEnabled { get; set; }
         public string PortalPrimaryIP { get; set; }
         public string PortalSecondaryIP { get; set; }
+        public bool MonitorEnabled { get; set; }
+        public bool MonitorTtl { get; set; }
+        public bool MonitorUa { get; set; }
+        public bool MonitorTls { get; set; }
     }
 
     public static class ProxyConfigManager
@@ -72,6 +76,7 @@ namespace WifiHotspot
             IDictionary<string, object> captive = GetDict(deviceforge, "captive");
             IDictionary<string, object> network = GetDict(root, "network");
             IDictionary<string, object> tun = GetDict(root, "tun");
+            IDictionary<string, object> monitor = GetDict(root, "monitor");
             string profile = GetString(root, "default_profile", "chrome-win11");
 
             return new ProxySettings
@@ -113,7 +118,11 @@ namespace WifiHotspot
                 IPv6GuardEnabled = GetBool(root, "ipv6_guard_enabled", true),
                 PortalBlockEnabled = GetBool(root, "portal_block_enabled", false),
                 PortalPrimaryIP = GetString(root, "portal_primary_ip", ""),
-                PortalSecondaryIP = GetString(root, "portal_secondary_ip", "")
+                PortalSecondaryIP = GetString(root, "portal_secondary_ip", ""),
+                MonitorEnabled = GetBool(monitor, "enabled", true),
+                MonitorTtl = GetBool(monitor, "ttl", true),
+                MonitorUa = GetBool(monitor, "ua", true),
+                MonitorTls = GetBool(monitor, "tls", true)
             };
         }
 
@@ -210,6 +219,12 @@ namespace WifiHotspot
             SetString(root, "portal_primary_ip", settings.PortalPrimaryIP ?? "");
             SetString(root, "portal_secondary_ip", settings.PortalSecondaryIP ?? "");
             SetBool(root, "gui_auto_start_proxy", settings.AutoStartProxy);
+
+            IDictionary<string, object> monitor = GetOrCreateDict(root, "monitor");
+            SetBool(monitor, "enabled", settings.MonitorEnabled);
+            SetBool(monitor, "ttl", settings.MonitorTtl);
+            SetBool(monitor, "ua", settings.MonitorUa);
+            SetBool(monitor, "tls", settings.MonitorTls);
 
             IDictionary<string, object> network = GetOrCreateDict(root, "network");
             SetBool(network, "enabled", settings.NetworkEnabled);
@@ -370,7 +385,8 @@ namespace WifiHotspot
   ""auto_reload"": true,
   ""gui_auto_start_proxy"": true,
 
-  ""network"": { ""enabled"": false, ""ttl"": 128, ""ipid"": true, ""tcp_options"": true, ""forward"": true, ""mtu_clamp_enabled"": false, ""mss_clamp"": 1460 },
+   ""monitor"": { ""enabled"": true, ""ttl"": true, ""ua"": true, ""tls"": true },
+   ""network"": { ""enabled"": false, ""ttl"": 128, ""ipid"": true, ""tcp_options"": true, ""forward"": true, ""mtu_clamp_enabled"": false, ""mss_clamp"": 1460 },
   ""tun"": { ""enabled"": false, ""name"": ""OneNetShare Tunnel"", ""ip"": ""10.66.0.1"", ""gateway_ip"": ""10.66.0.2"", ""prefix_len"": 24, ""route"": true, ""upstream_interface"": """", ""ttl"": 128 },
   ""log"": { ""level"": ""info"", ""file"": "" },
   ""deviceforge"": {

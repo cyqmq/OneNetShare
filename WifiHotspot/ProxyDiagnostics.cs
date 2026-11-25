@@ -22,6 +22,7 @@ namespace WifiHotspot
             AnalyzeConfig(configPath, lines);
             AnalyzeIPv6(configPath, lines);
             AnalyzePortal(configPath, lines);
+            AnalyzeMonitor(configPath, lines);
             AnalyzePorts(configPath, lines);
             AnalyzeLog(processOutput, lines);
             return string.Join("\n", lines.ToArray());
@@ -170,6 +171,73 @@ namespace WifiHotspot
                 lines.Add("[警告] 已启用 Portal 封堵，但主/备 IP 为空；请填写认证网关主 IP 和第二个 IP。");
             if (enabled && ips.Count > 0 && !PortalGuard.IsRunning)
                 lines.Add("[警告] Portal 封堵已配置但未运行；启动热点后会在 WinDivert FORWARD 层丢弃到这些 IP 的转发包。");
+        }
+
+        private static void AnalyzeMonitor(string configPath, List<string> lines)
+        {
+            string path = string.IsNullOrEmpty(configPath) ? ProxyConfigManager.DefaultConfigPath : configPath;
+            bool enabled = true;
+            bool ttl = true;
+            bool ua = true;
+            bool tls = true;
+            if (File.Exists(path))
+            {
+                try
+                {
+                    object parsed = new JavaScriptSerializer().DeserializeObject(File.ReadAllText(path, Encoding.UTF8));
+                    IDictionary<string, object> root = parsed as IDictionary<string, object>;
+                    if (root != null)
+                    {
+                        IDictionary<string, object> monitor = GetDict(root, "monitor");
+                        enabled = GetBool(monitor, "enabled", true);
+                        ttl = GetBool(monitor, "ttl", true);
+                        ua = GetBool(monitor, "ua", true);
+                        tls = GetBool(monitor, "tls", true);
+                    }
+                }
+                catch { }
+            }
+
+            lines.Add("核心监控: 总开关=" + (enabled ? "启用" : "关闭") +
+                      "；TTL=" + (ttl ? "启用" : "关闭") +
+                      "；UA=" + (ua ? "启用" : "关闭") +
+                      "；TLS=" + (tls ? "启用" : "关闭") +
+                      "；TTL运行状态=" + TrafficMonitor.Shared.StatusText);
+            if (enabled && ttl && !TrafficMonitor.Shared.IsRunning)
+                lines.Add("[警告] 配置要求 TTL 跳数监控，但当前未运行；启动热点后才会启用，或在代理设置里手动启动。");
+            if (enabled && ttl && !NetworkNormalizer.DriverAvailable())
+                lines.Add("[错误] 已启用 TTL 跳数监控，但 WinDivert.dll / WinDivert32.sys / WinDivert64.sys 不完整。");
+            if (enabled && !ua && !tls)
+                lines.Add("[提示] HTTP UA 与 TLS SNI/JA3 监控均已关闭；将无法从代理日志定位应用层指纹断网。");
+
+            var evidence = new List<string>();
+            string logPath = ProxyProcessManager.ProbeLogPath;
+            if (File.Exists(logPath))
+            {
+                try
+                {
+                    using (var stream = new FileStream(logPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                    using (var reader = new StreamReader(stream, Encoding.UTF8, true))
+                    {
+                        string line;
+                        while ((line = reader.ReadLine()) != null)
+                        {
+                            if (line.IndexOf("[监控]", StringComparison.Ordinal) < 0 &&
+                                line.IndexOf("TTL证据", StringComparison.Ordinal) < 0) continue;
+                            evidence.Add(line);
+                            if (evidence.Count > 400) evidence.RemoveAt(0);
+                        }
+                    }
+                }
+                catch { }
+            }
+            for (int i = Math.Max(0, evidence.Count - 8); i < evidence.Count; i++)
+                lines.Add("probe.log: " + evidence[i]);
+            string joined = string.Join("\n", evidence.ToArray());
+            if (joined.IndexOf("判定=Windows 原生路由递减", StringComparison.Ordinal) >= 0)
+                lines.Add("[判定] probe.log 已捕获同流入站/出站 TTL 相差 1：Windows 原生路由递减且未被纠正；应开启网络层归一化或全局 TUN 接管。");
+            if (joined.IndexOf("判定=疑似网关按应用层UA/指纹匹配断网", StringComparison.Ordinal) >= 0)
+                lines.Add("[判定] probe.log 已出现手机 UA 与电脑流量混杂后断开的证据：疑似认证网关按应用层指纹匹配断网。");
         }
 
         public static string CheckIPv6Safety()
@@ -364,7 +432,7 @@ namespace WifiHotspot
         private static bool IsInterestingLog(string line)
         {
             if (string.IsNullOrWhiteSpace(line)) return false;
-            string[] keys = { "失败", "错误", "panic", "error", "listen", "bind", "permission", "denied", "invalid", "config", "json", "wintun", "windivert", "TUN", "address already in use", "操作不允许", "没有找到" };
+            string[] keys = { "失败", "错误", "panic", "error", "listen", "bind", "permission", "denied", "invalid", "config", "json", "wintun", "windivert", "TUN", "address already in use", "操作不允许", "没有找到", "监控", "TTL证据", "监控证据" };
             foreach (string key in keys)
                 if (line.IndexOf(key, StringComparison.OrdinalIgnoreCase) >= 0) return true;
             return false;
