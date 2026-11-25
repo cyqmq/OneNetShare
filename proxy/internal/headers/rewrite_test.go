@@ -86,3 +86,58 @@ func TestBuiltinMobileAliases(t *testing.T) {
 		t.Fatal("mobile-ios 别名未生效")
 	}
 }
+
+func TestRewriteNormalizesFingerprintHeaders(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	data := `{"enabled":true,"mode":"forward","default_profile":"chrome-win11","rules":[{"name":"all","enabled":true,"domains":["*"],"profile":"chrome-win11"}],"deviceforge":{"enabled":true,"headers":true},"profiles":{}}`
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loader, err := config.NewLoader(path, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine := NewEngine(loader)
+	req := &Request{
+		Method: "GET", URI: "http://example.com/", Proto: "HTTP/1.1", Host: "example.com", Path: "/",
+		Headers: []Header{
+			{Key: "User-Agent", Value: "Mozilla/5.0 Android"},
+			{Key: "Accept-Language", Value: "en-US,en;q=0.5"},
+			{Key: "Accept-Encoding", Value: "gzip"},
+		},
+	}
+	_, rewritten, err := engine.Rewrite(req, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(rewritten, "Accept-Language: zh-CN,zh;q=0.9,en;q=0.8") {
+		t.Fatalf("Accept-Language 未归一: %s", rewritten)
+	}
+	if !strings.Contains(rewritten, "Accept-Encoding: gzip, deflate, br, zstd") {
+		t.Fatalf("Accept-Encoding 未归一: %s", rewritten)
+	}
+}
+
+func TestRewriteStripsRefererOnCaptiveProbe(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	data := `{"enabled":true,"mode":"forward","default_profile":"chrome-win11","rules":[{"name":"all","enabled":true,"domains":["*"],"profile":"chrome-win11"}],"deviceforge":{"enabled":true,"headers":true,"captive":{"enabled":true,"domains":["captive.apple.com"],"dns_domains":["captive.apple.com"],"paths":["/hotspot-detect.html"]}},"profiles":{}}`
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loader, err := config.NewLoader(path, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine := NewEngine(loader)
+	req := &Request{
+		Method: "GET", URI: "http://captive.apple.com/hotspot-detect.html", Proto: "HTTP/1.1", Host: "captive.apple.com", Path: "/hotspot-detect.html",
+		Headers: []Header{{Key: "Referer", Value: "http://captive.apple.com/"}, {Key: "Origin", Value: "http://captive.apple.com"}},
+	}
+	_, rewritten, err := engine.Rewrite(req, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(strings.ToLower(rewritten), "\r\nreferer:") || strings.Contains(strings.ToLower(rewritten), "\r\norigin:") {
+		t.Fatalf("captive probe Referer/Origin 未清除: %s", rewritten)
+	}
+}

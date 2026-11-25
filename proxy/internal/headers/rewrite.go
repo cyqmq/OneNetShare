@@ -186,6 +186,22 @@ func (e *Engine) Rewrite(req *Request, originalDst string) (string, string, erro
 		}
 	}
 
+	// Normalize fingerprint headers together with UA profile.
+	effectiveProfile := cfg.DefaultProfile
+	for _, rule := range cfg.Rules {
+		if rule.Enabled && matchRule(rule, req.Host, req.Path) && rule.Profile != "" {
+			effectiveProfile = rule.Profile
+		}
+	}
+	if p, ok := cfg.Profiles[effectiveProfile]; ok {
+		headers = normalizeFingerprintHeaders(headers, p.Headers)
+	} else if p, ok := config.BuiltinProfiles()["chrome-win11"]; ok {
+		headers = normalizeFingerprintHeaders(headers, p.Headers)
+	}
+	if cfg.DeviceForge.Captive.Enabled && isCaptiveProbe(req, cfg) {
+		headers = removeHeaders(headers, []string{"Referer", "Origin"})
+	}
+
 	// Always strip proxy-leak headers unless explicitly re-added by rule
 	headers = removeHeaders(headers, []string{
 		"X-Forwarded-For", "X-Real-IP", "X-Forwarded-Proto",
@@ -223,6 +239,36 @@ func matchRule(rule config.Rule, host, path string) bool {
 		return false
 	}
 	return true
+}
+
+func normalizeFingerprintHeaders(headers []Header, profileHeaders map[string]string) []Header {
+	for _, name := range []string{"Accept-Language", "Accept-Encoding"} {
+		if val, ok := headerValue(profileHeaders, name); ok {
+			headers = setHeaders(headers, map[string]string{name: val})
+		}
+	}
+	return headers
+}
+
+func isCaptiveProbe(req *Request, cfg *config.Config) bool {
+	host := strings.ToLower(req.Host)
+	path := strings.ToLower(req.Path)
+	for _, domain := range cfg.DeviceForge.Captive.Domains {
+		if config.MatchDomain(strings.ToLower(domain), host) {
+			return true
+		}
+	}
+	for _, domain := range cfg.DeviceForge.Captive.DNSDomains {
+		if config.MatchDomain(strings.ToLower(domain), host) {
+			return true
+		}
+	}
+	for _, probePath := range cfg.DeviceForge.Captive.Paths {
+		if probePath != "" && strings.HasPrefix(path, strings.ToLower(probePath)) {
+			return true
+		}
+	}
+	return false
 }
 
 func headerValue(values map[string]string, name string) (string, bool) {
