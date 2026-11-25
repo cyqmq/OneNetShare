@@ -66,7 +66,7 @@ HTTPS Captive 探测无法在不解密的情况下伪造 HTTP 响应；本版本
 | `tproxy` | iptables mangle TPROXY + IP_TRANSPARENT | 可保留/伪造源 IP，策略路由更灵活 |
 | `tun` | 用户态 TUN + 精简 TCP 状态机 | 跨平台性最好，IPID/窗口等由我们生成（模拟网关栈） |
 
-TUN 模式通过 `water` 库创建 `/dev/net/tun`，自己处理 SYN/SYN-ACK/ACK/数据/FIN，出站连接仍由网关 `net.Dial` 发起。当前 TUN 模式仅做 TCP 盲转发，Header 重写仅在 redirect/tproxy 的 HTTP 路径生效。
+TUN 模式通过 `water` 库创建 `/dev/net/tun`，自己处理 SYN/SYN-ACK/ACK/数据/FIN，出站连接仍由网关 `net.Dial` 发起。TUN 模式会对 TCP 80 的 HTTP 请求按消息边界解析并应用 Header 画像，移除 XFF/Via 等泄露头；同时启动 `listen_http` 端口供显式 HTTP 代理测试使用。HTTPS 仍不解密。
 
 ## 目录结构
 

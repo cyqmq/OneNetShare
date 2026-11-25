@@ -177,7 +177,7 @@ namespace WifiHotspot
             var btnDiagnose = NewButton("自动诊断", 108);
             btnDiagnose.Click += RunDiagnosis;
             var btnClearLog = NewButton("清空日志", 108);
-            btnClearLog.Click += delegate { txtProbeLog.Clear(); _probeLogOffset = File.Exists(ProxyProcessManager.ProbeLogPath) ? new FileInfo(ProxyProcessManager.ProbeLogPath).Length : 0; };
+            btnClearLog.Click += delegate { txtProbeLog.Clear(); ResetProbeLogOffset(); };
             probePanel.Controls.Add(btnClearLog);
             probePanel.Controls.Add(btnDiagnose);
             probePanel.Controls.Add(btnTest);
@@ -287,6 +287,25 @@ namespace WifiHotspot
             }
         }
 
+        private void ResetProbeLogOffset()
+        {
+            string path = ProxyProcessManager.ProbeLogPath;
+            if (!File.Exists(path))
+            {
+                _probeLogOffset = 0;
+                return;
+            }
+            try
+            {
+                using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                    _probeLogOffset = stream.Length;
+            }
+            catch
+            {
+                _probeLogOffset = 0;
+            }
+        }
+
         private void RefreshProbeLog(bool reset)
         {
             string path = ProxyProcessManager.ProbeLogPath;
@@ -300,38 +319,45 @@ namespace WifiHotspot
                 return;
             }
 
-            using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+            try
             {
-                if (reset || stream.Length < _probeLogOffset)
+                using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
                 {
-                    txtProbeLog.Clear();
-                    _probeLogOffset = 0;
-                }
-                if (stream.Length <= _probeLogOffset) return;
-                stream.Seek(_probeLogOffset, SeekOrigin.Begin);
-                byte[] buffer = new byte[stream.Length - _probeLogOffset];
-                int read = 0;
-                while (read < buffer.Length)
-                {
-                    int count = stream.Read(buffer, read, buffer.Length - read);
-                    if (count == 0) break;
-                    read += count;
-                }
-                _probeLogOffset += read;
-                string text = Encoding.UTF8.GetString(buffer, 0, read);
-                foreach (string line in text.Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries))
-                {
-                    int marker = line.IndexOf("[probe]", StringComparison.OrdinalIgnoreCase);
-                    if (marker < 0) continue;
-                    string message = line.Substring(marker).Replace("[probe]", string.Empty).Trim();
-                    string clock = DateTime.Now.ToString("HH:mm:ss");
-                    if (line.Length >= 19)
+                    if (reset || stream.Length < _probeLogOffset)
                     {
-                        DateTime parsed;
-                        if (DateTime.TryParse(line.Substring(0, 19), out parsed)) clock = parsed.ToString("HH:mm:ss");
+                        txtProbeLog.Clear();
+                        _probeLogOffset = 0;
                     }
-                    AppendProbeLine("[" + clock + "] " + message);
+                    if (stream.Length <= _probeLogOffset) return;
+                    stream.Seek(_probeLogOffset, SeekOrigin.Begin);
+                    byte[] buffer = new byte[stream.Length - _probeLogOffset];
+                    int read = 0;
+                    while (read < buffer.Length)
+                    {
+                        int count = stream.Read(buffer, read, buffer.Length - read);
+                        if (count == 0) break;
+                        read += count;
+                    }
+                    _probeLogOffset += read;
+                    string text = Encoding.UTF8.GetString(buffer, 0, read);
+                    foreach (string line in text.Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries))
+                    {
+                        int marker = line.IndexOf("[probe]", StringComparison.OrdinalIgnoreCase);
+                        if (marker < 0) continue;
+                        string message = line.Substring(marker).Replace("[probe]", string.Empty).Trim();
+                        string clock = DateTime.Now.ToString("HH:mm:ss");
+                        if (line.Length >= 19)
+                        {
+                            DateTime parsed;
+                            if (DateTime.TryParse(line.Substring(0, 19), out parsed)) clock = parsed.ToString("HH:mm:ss");
+                        }
+                        AppendProbeLine("[" + clock + "] " + message);
+                    }
                 }
+            }
+            catch
+            {
+                ResetProbeLogOffset();
             }
         }
 

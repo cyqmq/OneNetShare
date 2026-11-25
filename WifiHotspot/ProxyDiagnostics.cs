@@ -193,12 +193,23 @@ namespace WifiHotspot
             string logPath = ProxyProcessManager.ProbeLogPath;
             if (File.Exists(logPath))
             {
-                string[] logLines = File.ReadAllLines(logPath);
-                int start = Math.Max(0, logLines.Length - 400);
-                for (int i = start; i < logLines.Length; i++)
+                string[] logLines;
+                using (var stream = new FileStream(logPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                using (var reader = new StreamReader(stream, Encoding.UTF8, true))
                 {
-                    if (IsInterestingLog(logLines[i]))
-                        evidence.Add("probe.log: " + logLines[i]);
+                    var collected = new List<string>();
+                    string line;
+                    while ((line = reader.ReadLine()) != null)
+                    {
+                        collected.Add(line);
+                        if (collected.Count > 400) collected.RemoveAt(0);
+                    }
+                    logLines = collected.ToArray();
+                }
+                foreach (string line in logLines)
+                {
+                    if (IsInterestingLog(line))
+                        evidence.Add("probe.log: " + line);
                 }
             }
 

@@ -132,6 +132,7 @@ func (e *Engine) Rewrite(req *Request, originalDst string) (string, string, erro
 	copy(headers, req.Headers)
 
 	applied := false
+	uaSet := false
 	for _, rule := range cfg.Rules {
 		if !rule.Enabled {
 			continue
@@ -141,10 +142,16 @@ func (e *Engine) Rewrite(req *Request, originalDst string) (string, string, erro
 		}
 
 		if p, ok := cfg.Profiles[rule.Profile]; ok {
+			if _, ok := headerValue(p.Headers, "User-Agent"); ok {
+				uaSet = true
+			}
 			headers = setHeaders(headers, p.Headers)
 			applied = true
 		}
 		if len(rule.SetHeaders) > 0 {
+			if _, ok := headerValue(rule.SetHeaders, "User-Agent"); ok {
+				uaSet = true
+			}
 			headers = setHeaders(headers, rule.SetHeaders)
 			applied = true
 		}
@@ -160,9 +167,22 @@ func (e *Engine) Rewrite(req *Request, originalDst string) (string, string, erro
 
 	if !applied {
 		if p, ok := cfg.Profiles[cfg.DefaultProfile]; ok {
+			if _, ok := headerValue(p.Headers, "User-Agent"); ok {
+				uaSet = true
+			}
 			headers = setHeaders(headers, p.Headers)
 		} else if p, ok := config.BuiltinProfiles()["chrome-win11"]; ok {
+			uaSet = true
 			headers = setHeaders(headers, p.Headers)
+		}
+	}
+	if !uaSet {
+		ua, ok := headerValue(cfg.Profiles[cfg.DefaultProfile].Headers, "User-Agent")
+		if !ok {
+			ua, ok = headerValue(config.BuiltinProfiles()["chrome-win11"].Headers, "User-Agent")
+		}
+		if ok {
+			headers = setHeaders(headers, map[string]string{"User-Agent": ua})
 		}
 	}
 
@@ -203,6 +223,15 @@ func matchRule(rule config.Rule, host, path string) bool {
 		return false
 	}
 	return true
+}
+
+func headerValue(values map[string]string, name string) (string, bool) {
+	for key, value := range values {
+		if strings.EqualFold(key, name) && value != "" {
+			return value, true
+		}
+	}
+	return "", false
 }
 
 func setHeaders(headers []Header, values map[string]string) []Header {

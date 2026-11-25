@@ -46,6 +46,37 @@ func TestRewriteFallsBackWhenProfileMissing(t *testing.T) {
 	}
 }
 
+func TestRewriteForcesUAWhenProfileHasNone(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	data := `{"enabled":true,"mode":"forward","default_profile":"custom","rules":[{"name":"all","enabled":true,"domains":["*"],"profile":"custom"}],"deviceforge":{"enabled":true,"headers":true},"profiles":{"custom":{"description":"custom","headers":{"Accept":"*/*"}}}}`
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loader, err := config.NewLoader(path, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine := NewEngine(loader)
+	req := &Request{
+		Method:  "GET",
+		URI:     "http://example.com/probe",
+		Proto:   "HTTP/1.1",
+		Host:    "example.com",
+		Path:    "/probe",
+		Headers: []Header{{Key: "User-Agent", Value: "OneNetShare-Unprobed/1.0"}},
+	}
+	_, rewritten, err := engine.Rewrite(req, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(rewritten, "OneNetShare-Unprobed") {
+		t.Fatalf("UA 未被强制改写: %s", rewritten)
+	}
+	if !strings.Contains(rewritten, "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)") {
+		t.Fatalf("UA 未回退到内置画像: %s", rewritten)
+	}
+}
+
 func TestBuiltinMobileAliases(t *testing.T) {
 	profiles := config.BuiltinProfiles()
 	if profiles["mobile-android"].Headers["User-Agent"] != profiles["chrome-android"].Headers["User-Agent"] {
