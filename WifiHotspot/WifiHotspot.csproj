@@ -57,6 +57,10 @@
     <Compile Include="HotspotManager.cs" />
     <Compile Include="IcsManager.cs" />
     <Compile Include="MobileHotspotManager.cs" />
+    <Compile Include="HotspotDiagnosis.cs" />
+    <Compile Include="DiagnosisForm.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <ItemGroup>

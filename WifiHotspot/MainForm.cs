@@ -153,6 +153,13 @@ namespace WifiHotspot
             lblStatus.Text = string.Format("热点状态: {0}\n支持检测: {1}", statusText, support.Message);
         }
 
+        private void ShowHotspotDiagnosis(string message, IcsManager.NetworkAdapterInfo adapter)
+        {
+            var diagnosis = _manager.Diagnose(message, adapter, txtSsid.Text, txtPassword.Text);
+            using (var form = new DiagnosisForm(diagnosis))
+                form.ShowDialog(this);
+        }
+
         private void RefreshClients()
         {
             lstClients.Items.Clear();
@@ -189,8 +196,10 @@ namespace WifiHotspot
             Application.DoEvents();
 
             var result = _manager.Start(selected, txtSsid.Text, txtPassword.Text);
-            MessageBox.Show(result.Message, result.Success ? "启动结果" : "启动失败",
-                MessageBoxButtons.OK, result.Success ? MessageBoxIcon.Information : MessageBoxIcon.Error);
+            if (result.Success)
+                MessageBox.Show(result.Message, "启动结果", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            else
+                ShowHotspotDiagnosis(result.Message, selected);
 
             CheckSupportAndStatus();
         }
@@ -203,7 +212,10 @@ namespace WifiHotspot
             Application.DoEvents();
 
             var result = _manager.Stop();
-            MessageBox.Show(result.Message, "停止结果", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            if (result.Success)
+                MessageBox.Show(result.Message, "停止结果", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            else
+                ShowHotspotDiagnosis(result.Message, null);
 
             lstClients.Items.Clear();
             CheckSupportAndStatus();

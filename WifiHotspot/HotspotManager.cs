@@ -199,6 +199,132 @@ namespace WifiHotspot
             return new HotspotResult { Success = false, Message = "未找到承载网络支持信息。\n驱动输出:\n" + output };
         }
 
+        public HotspotDiagnosis Diagnose(string rawError, IcsManager.NetworkAdapterInfo internetAdapter, string ssid, string password)
+        {
+            var diagnosis = new HotspotDiagnosis { RawMessage = rawError ?? string.Empty };
+
+            if (!IsAdministrator())
+                AddIssue(diagnosis, "未以管理员权限运行", "程序检测到当前进程没有管理员权限，无法配置网络共享。",
+                    "右键 WifiHotspot.exe → 以管理员身份运行；或让程序请求管理员权限后重新启动。", string.Empty);
+
+            if (string.IsNullOrWhiteSpace(ssid))
+                AddIssue(diagnosis, "网络名称为空", "SSID 不能为空。",
+                    "程序窗口 → 网络名称 (SSID) → 填写名称后重试。", string.Empty);
+
+            if (string.IsNullOrEmpty(password) || password.Length < 8)
+                AddIssue(diagnosis, "密码不符合要求", "密码长度必须至少 8 位。",
+                    "程序窗口 → 密码 → 填写至少 8 位后重试。", string.Empty);
+
+            if (internetAdapter == null && !MobileHotspotManager.IsAvailable)
+                AddIssue(diagnosis, "未选择上网网卡", "传统承载网络需要指定正在连接互联网的网卡。",
+                    "程序窗口 → 上网网卡 → 选择当前正在上网的网卡。", string.Empty);
+
+            bool mobileEnabled;
+            string capability = MobileHotspotManager.GetCapability(out mobileEnabled);
+            if (!MobileHotspotManager.IsAvailable)
+            {
+                AddIssue(diagnosis, "Windows 移动热点 API 不可用", capability,
+                    "需要 Windows 10/11；旧系统只能使用传统承载网络。更新系统或改用支持 Hosted Network 的网卡/驱动。", "ms-settings:windowsupdate");
+            }
+            else
+            {
+                string mobileDetail;
+                MobileHotspotState mobileState = MobileHotspotManager.GetState(out mobileDetail);
+                if (mobileState == MobileHotspotState.Unavailable)
+                    AddIssue(diagnosis, "没有可用的互联网连接", mobileDetail,
+                        "设置 → 网络和 Internet → 状态；先连接可用 Wi-Fi、插入网线或启用移动宽带。", "ms-settings:network-status");
+                else if (mobileState == MobileHotspotState.Error)
+                    AddIssue(diagnosis, "移动热点状态读取失败", mobileDetail,
+                        "设置 → 网络和 Internet → 移动热点 → 确认页面可正常打开。", "ms-settings:network-mobilehotspot");
+
+                if (!mobileEnabled)
+                    AddIssue(diagnosis, "移动热点能力被禁用", capability,
+                        "设置 → 网络和 Internet → 移动热点；如由单位策略禁用，需要管理员在组策略中放开。", "ms-settings:network-mobilehotspot");
+            }
+
+            if (!IsServiceRunning("WlanSvc"))
+                AddIssue(diagnosis, "WLAN AutoConfig 服务未运行", "sc query WlanSvc 未显示正在运行。",
+                    "services.msc → WLAN AutoConfig → 启动，并将启动类型设为自动。", "services.msc");
+
+            if (!IsServiceRunning("icssvc"))
+                AddIssue(diagnosis, "Internet Connection Sharing 服务未运行", "sc query icssvc 未显示正在运行。",
+                    "services.msc → Internet Connection Sharing (ICS) → 启动，并将启动类型设为手动或自动。", "services.msc");
+
+            if (!HasEnabledWirelessAdapter())
+                AddIssue(diagnosis, "没有启用的无线网卡", "程序未找到处于工作状态的 Wireless80211 网卡。",
+                    "设置 → 网络和 Internet → Wi-Fi → 关闭飞行模式并打开 Wi-Fi；或在设备管理器中启用无线网卡。", "ms-settings:network-wifi");
+
+            bool legacyRelevant = !MobileHotspotManager.IsAvailable ||
+                (rawError ?? string.Empty).IndexOf("承载网络", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                (rawError ?? string.Empty).IndexOf("Hosted network", StringComparison.OrdinalIgnoreCase) >= 0;
+            if (legacyRelevant)
+            {
+                var support = CheckSupport();
+                if (!support.Success)
+                    AddIssue(diagnosis, "传统承载网络不可用", support.Message,
+                        "设备管理器 → 网络适配器 → 更新无线网卡驱动；或 Windows 更新 → 可选更新；也可使用支持 AP 模式的 USB 无线网卡。", "ms-settings:windowsupdate");
+            }
+
+            AddIssuesFromError(diagnosis, rawError ?? string.Empty);
+            return diagnosis;
+        }
+
+        private static void AddIssue(HotspotDiagnosis diagnosis, string title, string detail, string fixPath, string settingsUri)
+        {
+            diagnosis.Issues.Add(new HotspotIssue
+            {
+                Title = title,
+                Detail = detail,
+                FixPath = fixPath,
+                SettingsUri = settingsUri
+            });
+        }
+
+        private static bool IsServiceRunning(string serviceName)
+        {
+            var r = RunCommand("sc", "query " + serviceName);
+            return r.Success && IsWlanServiceRunning(r.Message);
+        }
+
+        private static bool HasEnabledWirelessAdapter()
+        {
+            foreach (var nic in NetworkInterface.GetAllNetworkInterfaces())
+            {
+                if (nic.NetworkInterfaceType != NetworkInterfaceType.Wireless80211) continue;
+                if (nic.OperationalStatus != OperationalStatus.Down && nic.OperationalStatus != OperationalStatus.NotPresent)
+                    return true;
+            }
+            return false;
+        }
+
+        private static void AddIssuesFromError(HotspotDiagnosis diagnosis, string message)
+        {
+            if (string.IsNullOrEmpty(message)) return;
+
+            if (message.IndexOf("WlanRadioOff", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                message.Contains("无线射频关闭") ||
+                message.Contains("飞行模式") ||
+                message.IndexOf("airplane mode", StringComparison.OrdinalIgnoreCase) >= 0)
+                AddIssue(diagnosis, "无线射频被关闭", "启动结果明确返回 WlanRadioOff 或飞行模式相关错误。",
+                    "设置 → 网络和 Internet → Wi-Fi → 打开 Wi-Fi；同时关闭飞行模式和笔记本无线开关。", "ms-settings:network-wifi");
+
+            if (message.IndexOf("InternetConnectionUnavailable", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                message.Contains("没有可用的互联网连接"))
+                AddIssue(diagnosis, "没有可共享的互联网连接", "启动结果明确返回 InternetConnectionUnavailable。",
+                    "设置 → 网络和 Internet → 状态 → 先让电脑连接可上网的网络。", "ms-settings:network-status");
+
+            if (message.IndexOf("DeviceNotSupported", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                message.Contains("设备或驱动不支持") ||
+                message.Contains("不支持承载网络"))
+                AddIssue(diagnosis, "设备或驱动不支持移动热点", "启动结果明确返回 DeviceNotSupported 或 Hosted Network 不支持。",
+                    "设备管理器 → 网络适配器 → 更新无线网卡驱动；或 Windows 更新 → 可选更新。", "ms-settings:windowsupdate");
+
+            if (message.Contains("组或资源的状态不是执行请求操作的正确状态") ||
+                message.IndexOf("group or resource is not in the correct state", StringComparison.OrdinalIgnoreCase) >= 0)
+                AddIssue(diagnosis, "承载网络状态冲突", "Windows 承载网络处于不可启动状态，程序已尝试重置但仍失败。",
+                    "设置 → 网络和 Internet → 移动热点 → 关闭系统移动热点后重试；如被其他软件占用，退出该软件后重试。", "ms-settings:network-mobilehotspot");
+        }
+
         public HotspotStatus GetStatus(out string detail)
         {
             detail = string.Empty;
@@ -348,12 +474,7 @@ namespace WifiHotspot
             {
                 string m = startResult.Message;
                 if (IsHostedNetworkStateError(m))
-                    return new HotspotResult { Success = false, Message = "无法启动热点。已自动尝试启动 WLAN 服务、启用无线网卡并重置承载网络，但仍失败。请依次检查:\n" +
-                        "1. 飞行模式已关闭，无线射频开关已打开\n" +
-                        "2. Wi-Fi 适配器未被其他程序占用\n" +
-                        "3. netsh wlan show drivers 显示支持承载网络\n" +
-                        "4. Windows 设置中的移动热点未占用同一网卡\n" +
-                        "5. 更新无线网卡驱动；部分新版驱动已移除 Hosted Network\n\n原始信息:\n" + m };
+                    return new HotspotResult { Success = false, Message = "无法启动热点。软件已自动尝试启动 WLAN 服务、启用无线网卡并重置承载网络，诊断结果将在窗口中显示。\n\n原始信息:\n" + m };
                 return startResult;
             }
 

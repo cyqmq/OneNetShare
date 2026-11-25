@@ -109,13 +109,47 @@ namespace WifiHotspot
             catch { return null; }
         }
 
+        internal static string GetCapability(out bool enabled)
+        {
+            enabled = false;
+            try
+            {
+                if (!IsAvailable) return "当前 Windows 版本不提供移动热点 API";
+                object profile = GetProfile();
+                if (profile == null) return "没有可用的互联网连接配置文件";
+                MethodInfo method = FindMethod(ManagerType, "GetTetheringCapabilityFromConnectionProfile", 1, true);
+                if (method == null) return "无法读取移动热点能力";
+                object value = method.Invoke(null, new[] { profile });
+                if (value == null) return "移动热点能力未知";
+                string text = value.ToString();
+                int number;
+                enabled = text == "Enabled" || (int.TryParse(text, out number) && number == 0);
+                return "移动热点能力: " + text;
+            }
+            catch (Exception ex)
+            {
+                return "读取移动热点能力失败: " + ex.Message;
+            }
+        }
+
         private static object GetManager()
+        {
+            object profile = GetProfile();
+            if (profile == null) return null;
+            return CreateManager(profile);
+        }
+
+        private static object GetProfile()
         {
             if (!IsAvailable) return null;
             MethodInfo getProfile = FindMethod(NetworkInformationType, "GetInternetConnectionProfile", 0, true);
             if (getProfile == null) return null;
-            object profile = getProfile.Invoke(null, null);
-            if (profile == null) return null;
+            return getProfile.Invoke(null, null);
+        }
+
+        private static object CreateManager(object profile)
+        {
+            if (!IsAvailable || profile == null) return null;
             MethodInfo create = FindMethod(ManagerType, "CreateFromConnectionProfile", 1, true);
             if (create == null) return null;
             return create.Invoke(null, new[] { profile });
