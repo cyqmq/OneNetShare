@@ -207,6 +207,15 @@ namespace WifiHotspot
                 AddIssue(diagnosis, "未以管理员权限运行", "程序检测到当前进程没有管理员权限，无法配置网络共享。",
                     "右键 WifiHotspot.exe → 以管理员身份运行；或让程序请求管理员权限后重新启动。", string.Empty);
 
+            try
+            {
+                ProxySettings proxySettings = ProxyConfigManager.Load();
+                if (proxySettings.NetworkEnabled && !NetworkNormalizer.DriverAvailable())
+                    AddIssue(diagnosis, "网络层归一化缺少 WinDivert", "已启用网络层指纹归一化，但程序目录和系统目录都没有 WinDivert.dll。",
+                        "把 WinDivert 2.x 的 WinDivert.dll、WinDivert.sys 与对应架构驱动放到程序目录，并以管理员运行；或在“代理功能”窗口关闭网络层归一化。", string.Empty);
+            }
+            catch { }
+
             if (string.IsNullOrWhiteSpace(ssid))
                 AddIssue(diagnosis, "网络名称为空", "SSID 不能为空。",
                     "程序窗口 → 网络名称 (SSID) → 填写名称后重试。", string.Empty);

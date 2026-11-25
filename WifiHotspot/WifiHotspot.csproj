@@ -64,6 +64,7 @@
     </Compile>
     <Compile Include="ProxyConfigManager.cs" />
     <Compile Include="ProxyProcessManager.cs" />
+    <Compile Include="NetworkNormalizer.cs" />
     <Compile Include="ProxySettingsForm.cs">
       <SubType>Form</SubType>
     </Compile>

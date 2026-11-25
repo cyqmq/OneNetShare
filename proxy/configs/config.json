@@ -5,6 +5,13 @@
   "listen_https": "0.0.0.0:18443",
   "default_profile": "chrome-win11",
   "auto_reload": true,
+  "network": {
+    "enabled": false,
+    "ttl": 64,
+    "ipid": true,
+    "tcp_options": true,
+    "forward": true
+  },
   "log": {
     "level": "info",
     "file": ""

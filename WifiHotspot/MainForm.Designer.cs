@@ -239,6 +239,7 @@ namespace WifiHotspot
             this.Name = "MainForm";
             this.Text = "WiFi 热点共享工具";
             this.Load += new System.EventHandler(this.MainForm_Load);
+            this.FormClosing += new System.Windows.Forms.FormClosingEventHandler(this.MainForm_FormClosing);
             this.grpSettings.ResumeLayout(false);
             this.grpSettings.PerformLayout();
             this.grpStatus.ResumeLayout(false);

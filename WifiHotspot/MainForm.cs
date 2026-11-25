@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Drawing;
 using System.IO;
 using System.Text;
@@ -33,6 +34,7 @@ namespace WifiHotspot
 
             LoadConfig();
             RefreshAdapters();
+            StartNetworkNormalizer();
             CheckSupportAndStatus();
             timerStatus.Start();
         }
@@ -150,8 +152,9 @@ namespace WifiHotspot
             }
 
             lblStatus.ForeColor = color;
-            lblStatus.Text = string.Format("热点状态: {0}\n支持检测: {1}\n代理: {2}", statusText, support.Message,
-                ProxyProcessManager.IsRunning() ? "运行中" : "未运行");
+            lblStatus.Text = string.Format("热点状态: {0}\n支持检测: {1}\n代理/网络层: {2} / {3}", statusText, support.Message,
+                ProxyProcessManager.IsRunning() ? "运行" : "未运行",
+                NetworkNormalizer.Shared.IsRunning ? "运行" : "未运行");
         }
 
         private void ShowHotspotDiagnosis(string message, IcsManager.NetworkAdapterInfo adapter)
@@ -256,6 +259,26 @@ namespace WifiHotspot
             CheckSupportAndStatus();
         }
 
+        private void StartNetworkNormalizer()
+        {
+            try
+            {
+                ProxySettings settings = ProxyConfigManager.Load();
+                if (!settings.NetworkEnabled) return;
+                var result = NetworkNormalizer.Shared.Start(settings);
+                if (!result.Success) ShowHotspotDiagnosis("网络层归一化启动失败:\n" + result.Message, null);
+            }
+            catch (Exception ex)
+            {
+                ShowHotspotDiagnosis("网络层归一化启动失败:\n" + ex.Message, null);
+            }
+        }
+
+        private void MainForm_FormClosing(object sender, FormClosingEventArgs e)
+        {
+            try { NetworkNormalizer.Shared.Stop(); } catch { }
+        }
+
         private void btnSave_Click(object sender, EventArgs e)
         {
             SaveConfig();
@@ -276,12 +299,13 @@ namespace WifiHotspot
             string detail;
             HotspotStatus status = _manager.GetStatus(out detail);
             bool isAdmin = HotspotManager.IsAdministrator();
-            string proxyState = ProxyProcessManager.IsRunning() ? "运行中" : "未运行";
+            string moduleState = (ProxyProcessManager.IsRunning() ? "运行" : "未运行") + " / " +
+                                  (NetworkNormalizer.Shared.IsRunning ? "运行" : "未运行");
 
             if (status == HotspotStatus.Running)
             {
                 lblStatus.ForeColor = Color.Green;
-                lblStatus.Text = "热点状态: " + detail + "\nSSID: " + txtSsid.Text + "\n代理: " + proxyState;
+                lblStatus.Text = "热点状态: " + detail + "\nSSID: " + txtSsid.Text + "\n代理/网络层: " + moduleState;
                 btnStart.Enabled = false;
                 btnStop.Enabled = isAdmin;
                 RefreshClients();
@@ -289,7 +313,7 @@ namespace WifiHotspot
             else if (status == HotspotStatus.Stopped)
             {
                 lblStatus.ForeColor = Color.DarkOrange;
-                lblStatus.Text = "热点状态: " + detail + "\n代理: " + proxyState;
+                lblStatus.Text = "热点状态: " + detail + "\n代理/网络层: " + moduleState;
                 btnStart.Enabled = isAdmin;
                 btnStop.Enabled = false;
                 lstClients.Items.Clear();
@@ -297,7 +321,7 @@ namespace WifiHotspot
             else
             {
                 lblStatus.ForeColor = Color.Red;
-                lblStatus.Text = "热点状态: " + detail + "\n状态检测失败，可尝试启动/停止\n代理: " + proxyState;
+                lblStatus.Text = "热点状态: " + detail + "\n状态检测失败，可尝试启动/停止\n代理/网络层: " + moduleState;
                 btnStart.Enabled = isAdmin;
                 btnStop.Enabled = isAdmin;
                 lstClients.Items.Clear();

@@ -18,6 +18,11 @@ namespace WifiHotspot
         public bool Dhcp { get; set; }
         public bool Captive { get; set; }
         public bool AutoStartProxy { get; set; }
+        public bool NetworkEnabled { get; set; }
+        public int NetworkTTL { get; set; }
+        public bool NetworkIPID { get; set; }
+        public bool NetworkTCPOptions { get; set; }
+        public bool NetworkForward { get; set; }
         public string Mode { get; set; }
         public string Profile { get; set; }
     }
@@ -44,6 +49,7 @@ namespace WifiHotspot
             IDictionary<string, object> mdns = GetDict(deviceforge, "mdns");
             IDictionary<string, object> dhcp = GetDict(deviceforge, "dhcp");
             IDictionary<string, object> captive = GetDict(deviceforge, "captive");
+            IDictionary<string, object> network = GetDict(root, "network");
 
             return new ProxySettings
             {
@@ -57,6 +63,11 @@ namespace WifiHotspot
                 Dhcp = GetBool(dhcp, "enabled", false),
                 Captive = GetBool(captive, "enabled", true),
                 AutoStartProxy = GetBool(root, "gui_auto_start_proxy", true),
+                NetworkEnabled = GetBool(network, "enabled", false),
+                NetworkTTL = GetInt(network, "ttl", 64),
+                NetworkIPID = GetBool(network, "ipid", true),
+                NetworkTCPOptions = GetBool(network, "tcp_options", true),
+                NetworkForward = GetBool(network, "forward", true),
                 Mode = GetString(root, "mode", "forward"),
                 Profile = GetString(root, "default_profile", "chrome-win11")
             };
@@ -98,6 +109,13 @@ namespace WifiHotspot
             SetString(root, "default_profile", string.IsNullOrEmpty(settings.Profile) ? "chrome-win11" : settings.Profile);
             SetBool(root, "gui_auto_start_proxy", settings.AutoStartProxy);
 
+            IDictionary<string, object> network = GetOrCreateDict(root, "network");
+            SetBool(network, "enabled", settings.NetworkEnabled);
+            SetInt(network, "ttl", settings.NetworkTTL);
+            SetBool(network, "ipid", settings.NetworkIPID);
+            SetBool(network, "tcp_options", settings.NetworkTCPOptions);
+            SetBool(network, "forward", settings.NetworkForward);
+
             SetBool(deviceforge, "enabled", settings.DeviceForgeEnabled);
             SetBool(deviceforge, "headers", settings.Headers);
             SetBool(GetOrCreateDict(deviceforge, "udp"), "enabled", settings.Udp);
@@ -133,6 +151,15 @@ namespace WifiHotspot
             return bool.TryParse(Convert.ToString(value), out parsed) ? parsed : fallback;
         }
 
+        private static int GetInt(IDictionary<string, object> dict, string key, int fallback)
+        {
+            object value;
+            if (dict == null || !dict.TryGetValue(key, out value)) return fallback;
+            int parsed;
+            if (value is int) return (int)value;
+            return int.TryParse(Convert.ToString(value), out parsed) ? parsed : fallback;
+        }
+
         private static string GetString(IDictionary<string, object> dict, string key, string fallback)
         {
             object value;
@@ -142,6 +169,11 @@ namespace WifiHotspot
         }
 
         private static void SetBool(IDictionary<string, object> dict, string key, bool value)
+        {
+            dict[key] = value;
+        }
+
+        private static void SetInt(IDictionary<string, object> dict, string key, int value)
         {
             dict[key] = value;
         }
@@ -161,6 +193,7 @@ namespace WifiHotspot
   ""default_profile"": ""chrome-win11"",
   ""auto_reload"": true,
   ""gui_auto_start_proxy"": true,
+  ""network"": { ""enabled"": false, ""ttl"": 64, ""ipid"": true, ""tcp_options"": true, ""forward"": true },
   ""log"": { ""level"": ""info"", ""file"": "" },
   ""deviceforge"": {
     ""enabled"": true,

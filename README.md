@@ -15,7 +15,7 @@
 | HTTPS CONNECT 盲隧道 | ✅ | ✅ |
 | Captive HTTP 代答/Drop | ✅ | ✅ |
 | REDIRECT / TPROXY / TUN 接管 | ❌ | ✅ |
-| TCP/IP 出口指纹统一 | ❌（出口是 Windows 主机） | ✅（网关重建连接） |
+| TCP/IP 出口指纹统一 | ✅（WinDivert，需额外驱动） | ✅（网关重建连接） |
 | UDP 全量接管 | ❌ | ✅（TUN/TPROXY） |
 | DNS / NTP / mDNS / DHCP 归一化 | ❌ | ✅ |
 | Captive DNS 代答/Drop | ❌ | ✅ |
@@ -27,6 +27,7 @@
 - 一键创建 WiFi 热点（优先 Windows 移动热点 API，失败回退 `netsh wlan hostednetwork`）
 - 自动诊断热点失败原因并给出可执行修改路径与设置入口
 - GUI 内置“代理功能”开关窗口，可编辑 HTTP Header/Captive/UDP/DNS/NTP/mDNS/DHCP 开关、设备指纹和随热点启停代理；未实现项在窗口内明确标注
+- 网络层指纹归一化：基于 WinDivert 在 Windows 网卡出口强制重写 TTL/IPID、IPv6 Flow Label 与 TCP SYN 选项；需要 WinDivert.dll/驱动和管理员权限
 - 自动配置 ICS（Internet Connection Sharing）网络共享
 - 可自定义 SSID、密码（8-63 位 WPA2）
 - 选择用于共享上网的物理网卡
@@ -51,6 +52,7 @@ winx86-hotspot/
 │   ├── ProxySettingsForm.cs     # 代理功能开关窗口
 │   ├── ProxyConfigManager.cs    # proxy/config.json 读写
 │   ├── ProxyProcessManager.cs   # hotspot-proxy.exe 启停
+│   ├── NetworkNormalizer.cs     # WinDivert 网络层 TTL/IPID/TCP 归一化
 │   ├── app.config               # .NET 运行时配置
 │   ├── app.manifest             # 管理员权限清单
 │   └── Properties/AssemblyInfo.cs
