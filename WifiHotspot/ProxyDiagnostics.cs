@@ -129,7 +129,7 @@ namespace WifiHotspot
                 lines.Add("[正常] 未检测到热点网卡公网/全局 IPv6 地址；仅 ULA(fdxx)/Link-local 时无需 IPv6 封禁。");
             else if (!IPv6Guard.IsRunning)
                 lines.Add("[警告] 检测到热点网卡公网/全局 IPv6 地址，热点启动时将自动启用封禁；单改 Flow Label 不足以防止 IPv6 裸奔。");
-            if (IPv6Guard.IsEnabled(policy) && !IPv6Guard.IsRunning)
+            if (global.Count > 0 && IPv6Guard.IsEnabled(policy) && !IPv6Guard.IsRunning)
                 lines.Add("[警告] 配置要求封禁 IPv6 转发，但 WinDivert 封禁当前未运行；热点启动后才会生效。");
         }
 
