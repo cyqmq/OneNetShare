@@ -217,12 +217,21 @@ namespace WifiHotspot
                         else if (settings.TunEnabled && !ProxyProcessManager.IsRunning())
                             ShowHotspotDiagnosis("全局 TUN 代理启动失败：\n" + proxyMessage, selected);
                     }
-                    if (IPv6Guard.IsEnabled(settings.IPv6Policy))
+                    List<string> globalIPv6 = ProxyDiagnostics.FindHotspotGlobalIPv6();
+                    bool needIPv6Guard = IPv6Guard.IsEnabled(settings.IPv6Policy) || globalIPv6.Count > 0;
+                    if (needIPv6Guard)
                     {
-                        var ipv6Result = IPv6Guard.Start(settings.IPv6Policy);
+                        string policy = IPv6Guard.IsEnabled(settings.IPv6Policy) ? settings.IPv6Policy : "block";
+                        if (globalIPv6.Count > 0 && !IPv6Guard.IsEnabled(settings.IPv6Policy))
+                            proxyMessage += "\n检测到热点网卡公网 IPv6 " + string.Join(", ", globalIPv6.ToArray()) + "，自动启用封禁。";
+                        var ipv6Result = IPv6Guard.Start(policy);
                         proxyMessage += "\n" + ipv6Result.Message;
                         if (!ipv6Result.Success)
                             ShowHotspotDiagnosis("IPv6 转发封禁启动失败：\n" + ipv6Result.Message, selected);
+                    }
+                    else
+                    {
+                        proxyMessage += "\n未检测到热点网卡公网 IPv6（仅 ULA/Link-local），未启用 IPv6 封禁。";
                     }
                     if (settings.PortalBlockEnabled)
                     {
