@@ -1,10 +1,12 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 using System.Net.NetworkInformation;
 using System.Security.Principal;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 
 namespace WifiHotspot
@@ -38,17 +40,50 @@ namespace WifiHotspot
             }
         }
 
-        private static Encoding GetOemEncoding()
+        public static string DecodeText(byte[] bytes)
         {
-            try
+            if (bytes == null || bytes.Length == 0) return string.Empty;
+
+            var candidates = new List<Encoding>();
+            if (bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF)
+                candidates.Add(new UTF8Encoding(false, false));
+            candidates.Add(new UTF8Encoding(false, true));
+
+            foreach (int codePage in new[] { 936, 54936, System.Globalization.CultureInfo.CurrentCulture.TextInfo.OEMCodePage, Encoding.Default.CodePage })
             {
-                int oemCp = System.Globalization.CultureInfo.CurrentCulture.TextInfo.OEMCodePage;
-                return Encoding.GetEncoding(oemCp);
+                try { candidates.Add(Encoding.GetEncoding(codePage)); }
+                catch { }
             }
-            catch
+
+            string best = string.Empty;
+            int bestScore = int.MinValue;
+            foreach (var encoding in candidates)
             {
-                return Encoding.Default;
+                try
+                {
+                    string decoded = encoding.GetString(bytes);
+                    int score = ScoreText(decoded);
+                    if (score > bestScore)
+                    {
+                        bestScore = score;
+                        best = decoded;
+                    }
+                }
+                catch (DecoderFallbackException) { }
             }
+            return best;
+        }
+
+        private static int ScoreText(string text)
+        {
+            int score = 0;
+            foreach (char c in text)
+            {
+                if (c == '\uFFFD') score -= 100;
+                else if (c >= 0x4E00 && c <= 0x9FFF) score += 10;
+                else if (char.IsControl(c) && c != '\r' && c != '\n' && c != '\t') score -= 5;
+            }
+            return score;
         }
 
         private static HotspotResult RunCommand(string fileName, string arguments, int timeoutMs = 15000)
@@ -60,9 +95,7 @@ namespace WifiHotspot
                     UseShellExecute = false,
                     CreateNoWindow = true,
                     RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    StandardOutputEncoding = GetOemEncoding(),
-                    StandardErrorEncoding = GetOemEncoding()
+                    RedirectStandardError = true
                 };
 
                 using (var process = Process.Start(psi))
@@ -70,21 +103,33 @@ namespace WifiHotspot
                     if (process == null)
                         return new HotspotResult { Success = false, Message = "无法启动进程: " + fileName };
 
-                    string stdout = process.StandardOutput.ReadToEnd();
-                    string stderr = process.StandardError.ReadToEnd();
-                    process.WaitForExit(timeoutMs);
-
-                    string output = (stdout + "\n" + stderr).Trim();
-                    bool exited = false;
-                    int exitCode = -1;
-                    try { exited = process.HasExited; if (exited) exitCode = process.ExitCode; }
-                    catch { }
-                    bool ok = exited && exitCode == 0;
-                    return new HotspotResult
+                    using (var stdoutBuffer = new MemoryStream())
+                    using (var stderrBuffer = new MemoryStream())
                     {
-                        Success = ok,
-                        Message = string.IsNullOrWhiteSpace(output) ? (ok ? "成功" : "命令执行失败") : output
-                    };
+                        Task stdoutTask = process.StandardOutput.BaseStream.CopyToAsync(stdoutBuffer);
+                        Task stderrTask = process.StandardError.BaseStream.CopyToAsync(stderrBuffer);
+
+                        bool exited = process.WaitForExit(timeoutMs);
+                        if (!exited)
+                        {
+                            try { process.Kill(); } catch { }
+                            exited = process.WaitForExit(1000);
+                        }
+                        Task.WaitAll(stdoutTask, stderrTask);
+
+                        string stdout = DecodeText(stdoutBuffer.ToArray());
+                        string stderr = DecodeText(stderrBuffer.ToArray());
+                        string output = (stdout + "\n" + stderr).Trim();
+                        int exitCode = -1;
+                        try { if (exited) exitCode = process.ExitCode; }
+                        catch { }
+                        bool ok = exited && exitCode == 0;
+                        return new HotspotResult
+                        {
+                            Success = ok,
+                            Message = string.IsNullOrWhiteSpace(output) ? (ok ? "成功" : "命令执行失败") : output
+                        };
+                    }
                 }
             }
             catch (Exception ex)

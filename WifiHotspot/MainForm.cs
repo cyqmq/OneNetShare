@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
+using System.Text;
 using System.Windows.Forms;
 
 namespace WifiHotspot
@@ -41,7 +42,8 @@ namespace WifiHotspot
             try
             {
                 if (!File.Exists(_configPath)) return;
-                foreach (string line in File.ReadAllLines(_configPath))
+                string content = HotspotManager.DecodeText(File.ReadAllBytes(_configPath));
+                foreach (string line in content.Split(new[] { "\r\n", "\n", "\r" }, StringSplitOptions.None))
                 {
                     if (string.IsNullOrWhiteSpace(line) || line.StartsWith("#")) continue;
                     string[] parts = line.Split(new[] { '=' }, 2);
@@ -81,7 +83,7 @@ namespace WifiHotspot
                     "Password=" + txtPassword.Text,
                     "AdapterId=" + selectedId
                 };
-                File.WriteAllLines(_configPath, lines);
+                File.WriteAllLines(_configPath, lines, new UTF8Encoding(true));
                 MessageBox.Show("设置已保存。", "提示", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             catch (Exception ex)
