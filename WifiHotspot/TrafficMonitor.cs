@@ -102,6 +102,36 @@ namespace WifiHotspot
             }
         }
 
+        private static IntPtr OpenSniff(string filter, out int error)
+        {
+            error = 0;
+            IntPtr handle = WinDivertOpen(filter, LayerNetwork, 0, FlagSniff);
+            if (handle == IntPtr.Zero || handle == new IntPtr(-1))
+                error = Marshal.GetLastWin32Error();
+            return handle;
+        }
+
+        public static string ErrorHint(int error)
+        {
+            if (error == 3)
+                return "错误码 3 (ERROR_PATH_NOT_FOUND)：WinDivert 驱动服务路径/驱动文件异常，或残留的旧驱动服务占用。请以管理员运行 `sc stop WinDivert`、`sc delete WinDivert` 后重启电脑；确认程序目录同时存在 WinDivert.dll、WinDivert32.sys、WinDivert64.sys，且未被安全软件隔离。";
+            if (error == 2)
+                return "错误码 2 (ERROR_FILE_NOT_FOUND)：缺少 WinDivert32.sys / WinDivert64.sys，请重新解压完整发行包并确认三个 WinDivert 文件在同一目录。";
+            if (error == 5)
+                return "错误码 5 (ERROR_ACCESS_DENIED)：请以管理员身份运行 WifiHotspot.exe。";
+            if (error == 87)
+                return "错误码 87 (ERROR_INVALID_PARAMETER)：WinDivert 过滤器或参数无效，请升级到最新发行包。";
+            if (error == 577)
+                return "错误码 577 (ERROR_INVALID_IMAGE_HASH)：WinDivert.sys 签名无效或被替换，请重新解压官方 WinDivert 2.2.2 文件。";
+            if (error == 654)
+                return "错误码 654 (ERROR_DRIVER_FAILED_PRIOR_UNLOAD)：已加载不兼容版本驱动，请以管理员运行 `sc stop WinDivert`、`sc delete WinDivert` 后重启电脑。";
+            if (error == 1275)
+                return "错误码 1275 (ERROR_DRIVER_BLOCKED)：驱动被安全软件或虚拟化环境阻止，请检查 Defender/第三方安全软件与虚拟机驱动策略。";
+            if (error == 1450)
+                return "错误码 1450 (ERROR_NO_SYSTEM_RESOURCES)：系统内核资源不足或驱动状态异常；请关闭其他 WinDivert/Clash/TUN 工具，重启电脑后重试。";
+            return "请确认 WinDivert 2.2.2 文件完整且以管理员运行；必要时执行 `sc stop WinDivert`、`sc delete WinDivert` 后重启。";
+        }
+
         public HotspotResult Start(ProxySettings settings)
         {
             if (_running)
@@ -129,14 +159,23 @@ namespace WifiHotspot
                 return new HotspotResult { Success = false, Message = _lastMessage };
             }
 
-            string filter = ttl ? "ip or ipv6" : "udp.SrcPort == 53 or udp.DstPort == 53";
+            string dnsFilter = "udp.SrcPort == 53 or udp.DstPort == 53";
+            string filter = ttl ? "ip or ipv6" : dnsFilter;
+            int error = 0;
             try
             {
-                _handle = WinDivertOpen(filter, LayerNetwork, 0, FlagSniff);
+                _handle = OpenSniff(filter, out error);
+                if ((_handle == IntPtr.Zero || _handle == new IntPtr(-1)) && ttl && dns)
+                {
+                    string first = "WinDivert sniff 打开失败，错误码 " + error + " filter=" + filter;
+                    WriteProbe("[probe][监控] " + first + "，尝试降级为 DNS-only 监控");
+                    filter = dnsFilter;
+                    _handle = OpenSniff(filter, out error);
+                    if (_handle != IntPtr.Zero && _handle != new IntPtr(-1)) ttl = false;
+                }
                 if (_handle == IntPtr.Zero || _handle == new IntPtr(-1))
                 {
-                    int error = Marshal.GetLastWin32Error();
-                    _lastMessage = "WinDivert sniff 打开失败，错误码 " + error + " filter=" + filter;
+                    _lastMessage = "WinDivert sniff 打开失败，错误码 " + error + " filter=" + filter + "\n" + ErrorHint(error);
                     WriteProbe("[probe][监控] " + _lastMessage);
                     return new HotspotResult { Success = false, Message = _lastMessage };
                 }
@@ -165,7 +204,8 @@ namespace WifiHotspot
             _thread.IsBackground = true;
             _thread.Start();
             _lastMessage = "核心监控已启动（WinDivert 只读 sniff；TTL=" + (ttl ? "开" : "关") +
-                           " DNS=" + (dns ? "开" : "关") + "）";
+                           " DNS=" + (dns ? "开" : "关") + "）" +
+                           (!ttl && dns ? "；TTL 因 filter 打开失败已降级关闭" : string.Empty);
             WriteProbe("[probe][监控] " + _lastMessage);
             return new HotspotResult { Success = true, Message = _lastMessage };
         }

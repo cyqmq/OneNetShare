@@ -218,6 +218,13 @@ namespace WifiHotspot
                 lines.Add("[警告] 配置要求 UDP:53 到达/转发监控，但当前未运行；无法区分手机未发出查询、电脑未收到、代理未转发。");
             if (enabled && ttl && !NetworkNormalizer.DriverAvailable())
                 lines.Add("[错误] 已启用 TTL/DNS 跳数与端口监控，但 WinDivert.dll / WinDivert32.sys / WinDivert64.sys 不完整。");
+            string monitorMessage = TrafficMonitor.Shared.LastMessage ?? string.Empty;
+            if (!TrafficMonitor.Shared.IsRunning && monitorMessage.Contains("错误码 3"))
+                lines.Add("[错误] WinDivert 驱动服务路径异常（ERROR_PATH_NOT_FOUND/3），当前核心监控未运行。请以管理员运行 `sc stop WinDivert`、`sc delete WinDivert` 后重启电脑，并确认三个 WinDivert 文件齐全且未被安全软件隔离。");
+            else if (!TrafficMonitor.Shared.IsRunning && monitorMessage.Contains("错误码 1450"))
+                lines.Add("[错误] WinDivert 资源耗尽（1450），核心监控未运行。请关闭其他 WinDivert/Clash/TUN 工具后重启电脑。");
+            else if (!TrafficMonitor.Shared.IsRunning && monitorMessage.Contains("错误码 87"))
+                lines.Add("[错误] WinDivert 过滤器/参数无效（87），核心监控未运行。请升级到最新发行包。");
             if (!dnsEmbedded)
                 lines.Add("[提示] 内嵌 DNS 服务已关闭；手机 DNS 查询将继续按原目标透明转发，没有本地缓存与上游 DNS 改写。");
             if (enabled && !ua && !tls)
