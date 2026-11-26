@@ -1,7 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Management;
+using System.Net;
 using System.Net.NetworkInformation;
+using System.Net.Sockets;
 using System.Reflection;
 using System.Runtime.InteropServices;
 
@@ -22,6 +25,18 @@ namespace WifiHotspot
             public override string ToString()
             {
                 return string.Format("{0}  [{1}]", Name, StatusText);
+            }
+        }
+
+        public class AdapterDnsState
+        {
+            public string AdapterName { get; set; }
+            public bool DhcpEnabled { get; set; }
+            public List<string> Servers { get; set; }
+
+            public AdapterDnsState()
+            {
+                Servers = new List<string>();
             }
         }
 
@@ -211,6 +226,114 @@ namespace WifiHotspot
                 return 0;
             }
             return 0;
+        }
+
+        public static AdapterDnsState GetDnsState(NetworkAdapterInfo adapter)
+        {
+            var state = new AdapterDnsState { AdapterName = adapter.Name, DhcpEnabled = true };
+            try
+            {
+                using (var searcher = new ManagementObjectSearcher("SELECT InterfaceIndex, Description, DHCPEnabled, DNSServersSearchOrder FROM Win32_NetworkAdapterConfiguration"))
+                using (var results = searcher.Get())
+                {
+                    foreach (ManagementObject item in results)
+                    {
+                        using (item)
+                        {
+                            int index = Convert.ToInt32(item["InterfaceIndex"]);
+                            string description = Convert.ToString(item["Description"]);
+                            bool same = (adapter.InterfaceIndex > 0 && index == adapter.InterfaceIndex) ||
+                                        (!string.IsNullOrEmpty(adapter.Description) &&
+                                         string.Equals(description, adapter.Description, StringComparison.OrdinalIgnoreCase));
+                            if (!same) continue;
+                            state.DhcpEnabled = Convert.ToBoolean(item["DHCPEnabled"]);
+                            object servers = item["DNSServersSearchOrder"];
+                            var values = servers as string[];
+                            if (values != null)
+                            {
+                                foreach (string value in values)
+                                {
+                                    IPAddress ip;
+                                    if (!IPAddress.TryParse(value, out ip) || ip.AddressFamily != AddressFamily.InterNetwork) continue;
+                                    if (ip.Equals(IPAddress.Any) || ip.ToString().StartsWith("127.")) continue;
+                                    if (!state.Servers.Contains(ip.ToString())) state.Servers.Add(ip.ToString());
+                                }
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+            catch
+            {
+            }
+            return state;
+        }
+
+        public static HotspotResult SetDnsServers(NetworkAdapterInfo adapter, List<string> servers)
+        {
+            if (adapter == null || string.IsNullOrEmpty(adapter.Name))
+                return new HotspotResult { Success = false, Message = "网卡名称为空，无法设置 DNS" };
+            if (servers == null || servers.Count == 0)
+            {
+                var dhcpResult = RunCommand("netsh", "interface ipv4 set dnsservers name=" + Quote(adapter.Name) + " dhcp");
+                dhcpResult.Message = "已恢复网卡 " + adapter.Name + " 的 DNS 为 DHCP 自动获取";
+                return dhcpResult;
+            }
+
+            string name = Quote(adapter.Name);
+            string first = servers[0];
+            var result = RunCommand("netsh", "interface ipv4 set dnsservers name=" + name + " static " + first + " primary");
+            if (!result.Success) return result;
+            for (int i = 1; i < servers.Count && i < 3; i++)
+            {
+                var extra = RunCommand("netsh", "interface ipv4 add dnsservers name=" + name + " " + servers[i] + " index=" + (i + 1));
+                if (!extra.Success) return extra;
+            }
+            result.Message = "已将 DNS 写入网卡 " + adapter.Name + ": " + string.Join(", ", servers.ToArray());
+            return result;
+        }
+
+        public static HotspotResult RestoreDnsServers(NetworkAdapterInfo adapter, AdapterDnsState state)
+        {
+            if (adapter == null || state == null || string.IsNullOrEmpty(adapter.Name))
+                return new HotspotResult { Success = true, Message = "无需恢复 DNS" };
+            if (state.DhcpEnabled || state.Servers.Count == 0)
+            {
+                var result = RunCommand("netsh", "interface ipv4 set dnsservers name=" + Quote(adapter.Name) + " dhcp");
+                result.Message = "已恢复网卡 " + adapter.Name + " 的 DNS 为 DHCP 自动获取";
+                return result;
+            }
+            return SetDnsServers(adapter, state.Servers);
+        }
+
+        private static string Quote(string value)
+        {
+            return "\"" + value.Replace("\"", "\\\"") + "\"";
+        }
+
+        private static HotspotResult RunCommand(string file, string arguments)
+        {
+            try
+            {
+                var start = new ProcessStartInfo(file, arguments)
+                {
+                    CreateNoWindow = true,
+                    RedirectStandardError = true,
+                    RedirectStandardOutput = true,
+                    UseShellExecute = false
+                };
+                using (var process = Process.Start(start))
+                {
+                    string output = process.StandardOutput.ReadToEnd() + process.StandardError.ReadToEnd();
+                    process.WaitForExit();
+                    return new HotspotResult { Success = process.ExitCode == 0, Message = output.Trim() };
+                }
+            }
+            catch (Exception ex)
+            {
+                return new HotspotResult { Success = false, Message = ex.Message };
+            }
         }
 
         public HotspotResult EnableSharing(string publicAdapterId, string privateAdapterId)

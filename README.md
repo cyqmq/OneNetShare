@@ -27,6 +27,7 @@
 - 一键创建 WiFi 热点（优先 Windows 移动热点 API，失败回退 `netsh wlan hostednetwork`）
 - 两种网络拓扑：`自动（当前行为）` 保持原有自动选路；`有线入口 → 无线热点` 强制选择有线以太网卡作为 ICS 公共端、指定无线网卡作为热点端，绕过 WinRT 自动热点选路，明确流量方向为“有线入口 → 本机 ICS/NAT → 无线客户端”
 - 有线入口模式保护：跳过全局 WinDivert 网络层归一化，IPv6/Portal 转发封禁只作用于热点虚拟网卡 `ifIdx`，避免改写或丢弃有线入口上的上游流量；只读 TTL/DNS 监控保持工作
+- 有线入口 DNS 下发：启动前把代理设置中的 `upstream_servers` 临时写入所选有线网卡，作为 Windows ICS 的 DNS 上游，解决客户端拿到 IP 但 DNS 不可用；停止热点后自动恢复原 DNS/DHCP 设置。ICS 共享失败时直接报错，不再伪装成启动成功
 - 自动诊断热点失败原因并给出可执行修改路径与设置入口
 - GUI 内置“代理功能”开关窗口，可编辑 HTTP Header/Captive/UDP/DNS/NTP/mDNS/DHCP 开关、DNS 上游服务器/去 EDNS/强制 TCP/TTL 钳制、设备指纹和随热点启停代理；“UA 预设”下拉框提供内置 UA 库（Chrome/Edge/Firefox/Safari/curl），无需手输，UA/Client Hints/平台版本由同一画像生成，Firefox/Safari 不带 Chromium Hints；强制 TTL 随设备指纹自动填入推荐值（Windows 画像 128，Android/macOS/iOS/Linux 画像 64），手动改偏会提示；Wintun 模式强制从下拉列表选择真实物理出口网卡，过滤 VMware/Hyper-V/WSL 等虚拟网卡；未实现项在窗口内明确标注
 - MTU/MSS 钳制自动降级：WinDivert SYN MSS 与 Wintun 合成 SYN-ACK MSS 均可钳制到 1460/1360/1280，便于排查网站卡在 TLS 握手的问题

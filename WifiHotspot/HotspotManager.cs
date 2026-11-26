@@ -33,6 +33,8 @@ namespace WifiHotspot
         private readonly IcsManager _ics = new IcsManager();
         private string _activeUpstreamId;
         private string _activePrivateId;
+        private IcsManager.NetworkAdapterInfo _dnsAdapter;
+        private IcsManager.AdapterDnsState _dnsRestore;
 
         public static bool IsAdministrator()
         {
@@ -484,6 +486,63 @@ namespace WifiHotspot
             return legacy;
         }
 
+        private HotspotResult EnsureWiredUpstreamDns(IcsManager.NetworkAdapterInfo adapter)
+        {
+            _dnsAdapter = null;
+            _dnsRestore = null;
+            var state = IcsManager.GetDnsState(adapter);
+            var servers = new List<string>();
+            try
+            {
+                string configured = ProxyConfigManager.Load().DnsUpstreamServers;
+                foreach (string part in (configured ?? string.Empty).Split(new[] { ',', ';', ' ', '\r', '\n', '\t' }, StringSplitOptions.RemoveEmptyEntries))
+                {
+                    System.Net.IPAddress ip;
+                    if (!System.Net.IPAddress.TryParse(part.Trim(), out ip) || ip.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork) continue;
+                    string value = ip.ToString();
+                    if (!servers.Contains(value)) servers.Add(value);
+                    if (servers.Count == 3) break;
+                }
+            }
+            catch
+            {
+            }
+            if (servers.Count == 0) servers.AddRange(state.Servers);
+            if (servers.Count == 0) servers.Add("1.1.1.1");
+
+            bool unchanged = state.Servers.Count == servers.Count;
+            if (unchanged)
+            {
+                for (int i = 0; i < servers.Count; i++)
+                {
+                    if (!string.Equals(state.Servers[i], servers[i], StringComparison.OrdinalIgnoreCase))
+                    {
+                        unchanged = false;
+                        break;
+                    }
+                }
+            }
+            if (unchanged)
+                return new HotspotResult { Success = true, Message = "有线入口 DNS 就绪: " + string.Join(", ", servers.ToArray()) };
+
+            var result = IcsManager.SetDnsServers(adapter, servers);
+            if (result.Success)
+            {
+                _dnsAdapter = adapter;
+                _dnsRestore = state;
+                result.Message = "已将上游 DNS 下发到有线入口 " + adapter.Name + ": " + string.Join(", ", servers.ToArray()) + "；停止热点后自动恢复。";
+            }
+            return result;
+        }
+
+        private void RestoreWiredUpstreamDns()
+        {
+            if (_dnsAdapter != null && _dnsRestore != null)
+                IcsManager.RestoreDnsServers(_dnsAdapter, _dnsRestore);
+            _dnsAdapter = null;
+            _dnsRestore = null;
+        }
+
         public HotspotResult StartWiredWifi(IcsManager.NetworkAdapterInfo wiredAdapter, IcsManager.NetworkAdapterInfo wirelessAdapter, string ssid, string password)
         {
             if (wiredAdapter == null)
@@ -497,15 +556,22 @@ namespace WifiHotspot
             if (string.Equals(wiredAdapter.Id, wirelessAdapter.Id, StringComparison.OrdinalIgnoreCase))
                 return new HotspotResult { Success = false, Message = "上游网卡与热点网卡不能相同" };
 
-            var legacy = StartLegacy(wiredAdapter, ssid, password, wirelessAdapter);
+            var dns = EnsureWiredUpstreamDns(wiredAdapter);
+            if (!dns.Success)
+                return new HotspotResult { Success = false, Message = "上游 DNS 下发失败:\n" + dns.Message };
+
+            var legacy = StartLegacy(wiredAdapter, ssid, password, wirelessAdapter, true);
             if (!legacy.Success)
+            {
+                RestoreWiredUpstreamDns();
                 return new HotspotResult { Success = false, Message = "有线入口/无线热点启动失败:\n" + legacy.Message };
+            }
             legacy.Message = "有线入口 → 无线热点 已启动。\n上行: " + wiredAdapter.Name +
-                             "\n热点: " + wirelessAdapter.Name + "\n" + legacy.Message;
+                             "\n热点: " + wirelessAdapter.Name + "\n" + dns.Message + "\n" + legacy.Message;
             return legacy;
         }
 
-        private HotspotResult StartLegacy(IcsManager.NetworkAdapterInfo internetAdapter, string ssid, string password, IcsManager.NetworkAdapterInfo wirelessAdapter = null)
+        private HotspotResult StartLegacy(IcsManager.NetworkAdapterInfo internetAdapter, string ssid, string password, IcsManager.NetworkAdapterInfo wirelessAdapter = null, bool strictIcs = false)
         {
             var prepare = PrepareHostedNetwork(wirelessAdapter);
             if (!prepare.Success)
@@ -536,7 +602,16 @@ namespace WifiHotspot
 
             var virtualAdapter = GetHostedNetworkAdapter();
             if (virtualAdapter == null)
-                return new HotspotResult { Success = true, Message = "热点已启动，但未找到虚拟网卡，ICS 共享需手动设置。" };
+            {
+                if (strictIcs) RunCommand("netsh", "wlan stop hostednetwork");
+                return new HotspotResult
+                {
+                    Success = !strictIcs,
+                    Message = strictIcs
+                        ? "无法找到承载网络虚拟网卡，无法为客户端下发 DNS/网关；请检查 Hosted Network 驱动后重试。"
+                        : "热点已启动，但未找到虚拟网卡，ICS 共享需手动设置。"
+                };
+            }
 
             if (internetAdapter != null)
             {
@@ -547,9 +622,16 @@ namespace WifiHotspot
                     _activePrivateId = virtualAdapter.Id;
                 }
                 if (!icsResult.Success)
-                    return new HotspotResult { Success = true, Message =
-                        "热点已启动，但 ICS 共享设置失败: " + icsResult.Message +
-                        "\n请到 控制面板 → 网络连接 → 右键当前上网网卡 → 属性 → 共享 中手动勾选共享。" };
+                {
+                    if (strictIcs) RunCommand("netsh", "wlan stop hostednetwork");
+                    return new HotspotResult
+                    {
+                        Success = !strictIcs,
+                        Message = "ICS 共享设置失败: " + icsResult.Message +
+                                  "\nICS 负责给手机下发网关与 DNS；未成功时客户端不会收到 DNS。" +
+                                  "\n请到 控制面板 → 网络连接 → 右键当前上网网卡 → 属性 → 共享 中手动勾选共享。"
+                    };
+                }
             }
 
             return new HotspotResult { Success = true, Message = "热点已启动并开启网络共享。" };
@@ -585,6 +667,7 @@ namespace WifiHotspot
             }
             _activeUpstreamId = null;
             _activePrivateId = null;
+            RestoreWiredUpstreamDns();
 
             var r = RunCommand("netsh", "wlan stop hostednetwork");
             if (r.Success)
