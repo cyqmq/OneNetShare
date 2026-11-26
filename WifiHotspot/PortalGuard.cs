@@ -56,7 +56,7 @@ namespace WifiHotspot
             return string.Join(" or ", parts.ToArray());
         }
 
-        public static HotspotResult Start(string primary, string secondary)
+        public static HotspotResult Start(string primary, string secondary, int interfaceIndex = 0)
         {
             List<string> ips = ParseIPs(primary, secondary);
             if (ips.Count == 0)
@@ -82,6 +82,7 @@ namespace WifiHotspot
 
             IntPtr handle = IntPtr.Zero;
             string filter = BuildFilter(ips);
+            if (interfaceIndex > 0) filter = "ifIdx == " + interfaceIndex + " and (" + filter + ")";
             try
             {
                 handle = WinDivertOpen(filter, LayerNetworkForward, GuardPriority, FlagDrop);
@@ -100,7 +101,8 @@ namespace WifiHotspot
 
             _handle = handle;
             _running = true;
-            _lastMessage = "Portal 封堵已启动（" + string.Join(", ", ips.ToArray()) + "）";
+            string scope = interfaceIndex > 0 ? "，仅热点接口 ifIdx=" + interfaceIndex : "，全局";
+            _lastMessage = "Portal 封堵已启动（" + string.Join(", ", ips.ToArray()) + "）" + scope;
             return new HotspotResult { Success = true, Message = _lastMessage };
         }
 

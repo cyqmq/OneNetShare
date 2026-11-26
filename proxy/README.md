@@ -13,6 +13,7 @@ Go 单文件二进制，双端部署：OpenWrt 网关透明劫持（REDIRECT 模
 - **DeviceForge**：总开关式终端特征收敛，统一 Header / UDP / DNS / NTP / mDNS / DHCP 指纹
 - **核心监控（只读）**：`monitor` 开关记录原始/改写后的 HTTP User-Agent；HTTPS 不解密，仅在 CONNECT/透明转发入口被动解析首个 ClientHello 的 SNI 与 JA3；90 秒内手机 UA 与电脑流量混杂且随后断开时写入 `[probe][监控证据]`
 - **内嵌 DNS 服务+缓存**：`deviceforge.dns.embedded=true` 时手机 UDP:53 查询先查本地缓存，未命中经出口网卡配置的 DNS 上游查询；支持 TTL 递减、负缓存、EDNS 清理与 TCP 上游
+- **Windows 有线入口拓扑**：GUI 可选 `有线入口 → 无线热点`，强制用有线以太网卡作为 ICS 公共端、指定无线网卡作为热点端；该模式跳过全局网络层归一化，IPv6/Portal 封禁只作用于热点接口 `ifIdx`
 - **Captive 探测处置**：由路由器代答或 Drop，避免 Apple/Windows/Android/Firefox 探测外泄
 
 ## 底层指纹统一原理（重要）

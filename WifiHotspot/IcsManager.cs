@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Management;
 using System.Net.NetworkInformation;
 using System.Reflection;
 using System.Runtime.InteropServices;
@@ -15,6 +16,8 @@ namespace WifiHotspot
             public string Description { get; set; }
             public bool IsActive { get; set; }
             public string StatusText { get; set; }
+            public NetworkInterfaceType InterfaceType { get; set; }
+            public int InterfaceIndex { get; set; }
 
             public override string ToString()
             {
@@ -157,7 +160,57 @@ namespace WifiHotspot
                     });
                 }
             }
+            foreach (var adapter in list) EnrichAdapter(adapter);
             return list;
+        }
+
+        private static void EnrichAdapter(NetworkAdapterInfo adapter)
+        {
+            adapter.InterfaceIndex = GetInterfaceIndex(adapter.Id, adapter.Name, adapter.Description);
+            foreach (var nic in NetworkInterface.GetAllNetworkInterfaces())
+            {
+                bool same = (!string.IsNullOrEmpty(adapter.Id) &&
+                             string.Equals(nic.Id, adapter.Id, StringComparison.OrdinalIgnoreCase)) ||
+                            string.Equals(nic.Name, adapter.Name, StringComparison.OrdinalIgnoreCase) ||
+                            (!string.IsNullOrEmpty(adapter.Description) &&
+                             string.Equals(nic.Description, adapter.Description, StringComparison.OrdinalIgnoreCase));
+                if (!same) continue;
+                adapter.InterfaceType = nic.NetworkInterfaceType;
+                return;
+            }
+        }
+
+        public static int GetInterfaceIndex(string id, string name, string description = null)
+        {
+            try
+            {
+                using (var searcher = new ManagementObjectSearcher("SELECT InterfaceIndex, GUID, NetConnectionID, Name FROM Win32_NetworkAdapter"))
+                using (var results = searcher.Get())
+                {
+                    foreach (ManagementObject item in results)
+                    {
+                        using (item)
+                        {
+                            string guid = item["GUID"] as string;
+                            string connection = item["NetConnectionID"] as string;
+                            string descriptionValue = item["Name"] as string;
+                            bool same = (!string.IsNullOrEmpty(id) && !string.IsNullOrEmpty(guid) &&
+                                         string.Equals(id.Trim('{', '}'), guid.Trim('{', '}'), StringComparison.OrdinalIgnoreCase)) ||
+                                        (!string.IsNullOrEmpty(name) &&
+                                         string.Equals(name, connection, StringComparison.OrdinalIgnoreCase)) ||
+                                        (!string.IsNullOrEmpty(description) &&
+                                         string.Equals(description, descriptionValue, StringComparison.OrdinalIgnoreCase));
+                            if (!same) continue;
+                            return Convert.ToInt32(item["InterfaceIndex"]);
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                return 0;
+            }
+            return 0;
         }
 
         public HotspotResult EnableSharing(string publicAdapterId, string privateAdapterId)

@@ -31,6 +31,8 @@ namespace WifiHotspot
     public class HotspotManager
     {
         private readonly IcsManager _ics = new IcsManager();
+        private string _activeUpstreamId;
+        private string _activePrivateId;
 
         public static bool IsAdministrator()
         {
@@ -432,7 +434,7 @@ namespace WifiHotspot
                    message.Contains("The group or resource is not in the correct state");
         }
 
-        private HotspotResult PrepareHostedNetwork()
+        private HotspotResult PrepareHostedNetwork(IcsManager.NetworkAdapterInfo wirelessAdapter = null)
         {
             var query = RunCommand("sc", "query WlanSvc");
             if (!query.Success || !IsWlanServiceRunning(query.Message))
@@ -450,6 +452,10 @@ namespace WifiHotspot
             foreach (var nic in NetworkInterface.GetAllNetworkInterfaces())
             {
                 if (nic.NetworkInterfaceType != NetworkInterfaceType.Wireless80211) continue;
+                if (wirelessAdapter != null &&
+                    !string.Equals(nic.Id, wirelessAdapter.Id, StringComparison.OrdinalIgnoreCase) &&
+                    !string.Equals(nic.Name, wirelessAdapter.Name, StringComparison.OrdinalIgnoreCase))
+                    continue;
                 if (nic.OperationalStatus != OperationalStatus.Down && nic.OperationalStatus != OperationalStatus.NotPresent) continue;
                 RunCommand("netsh", string.Format("interface set interface \"{0}\" admin=ENABLED", EscapeArgument(nic.Name)));
             }
@@ -478,9 +484,30 @@ namespace WifiHotspot
             return legacy;
         }
 
-        private HotspotResult StartLegacy(IcsManager.NetworkAdapterInfo internetAdapter, string ssid, string password)
+        public HotspotResult StartWiredWifi(IcsManager.NetworkAdapterInfo wiredAdapter, IcsManager.NetworkAdapterInfo wirelessAdapter, string ssid, string password)
         {
-            var prepare = PrepareHostedNetwork();
+            if (wiredAdapter == null)
+                return new HotspotResult { Success = false, Message = "有线入口模式未选择上游网卡" };
+            if (wirelessAdapter == null)
+                return new HotspotResult { Success = false, Message = "有线入口模式未选择无线热点网卡" };
+            if (wiredAdapter.InterfaceType != NetworkInterfaceType.Ethernet)
+                return new HotspotResult { Success = false, Message = "上游网卡不是有线以太网: " + wiredAdapter.Name };
+            if (wirelessAdapter.InterfaceType != NetworkInterfaceType.Wireless80211)
+                return new HotspotResult { Success = false, Message = "热点网卡不是无线网卡: " + wirelessAdapter.Name };
+            if (string.Equals(wiredAdapter.Id, wirelessAdapter.Id, StringComparison.OrdinalIgnoreCase))
+                return new HotspotResult { Success = false, Message = "上游网卡与热点网卡不能相同" };
+
+            var legacy = StartLegacy(wiredAdapter, ssid, password, wirelessAdapter);
+            if (!legacy.Success)
+                return new HotspotResult { Success = false, Message = "有线入口/无线热点启动失败:\n" + legacy.Message };
+            legacy.Message = "有线入口 → 无线热点 已启动。\n上行: " + wiredAdapter.Name +
+                             "\n热点: " + wirelessAdapter.Name + "\n" + legacy.Message;
+            return legacy;
+        }
+
+        private HotspotResult StartLegacy(IcsManager.NetworkAdapterInfo internetAdapter, string ssid, string password, IcsManager.NetworkAdapterInfo wirelessAdapter = null)
+        {
+            var prepare = PrepareHostedNetwork(wirelessAdapter);
             if (!prepare.Success)
                 return prepare;
 
@@ -514,6 +541,11 @@ namespace WifiHotspot
             if (internetAdapter != null)
             {
                 var icsResult = _ics.EnableSharing(internetAdapter.Id, virtualAdapter.Id);
+                if (icsResult.Success)
+                {
+                    _activeUpstreamId = internetAdapter.Id;
+                    _activePrivateId = virtualAdapter.Id;
+                }
                 if (!icsResult.Success)
                     return new HotspotResult { Success = true, Message =
                         "热点已启动，但 ICS 共享设置失败: " + icsResult.Message +
@@ -543,9 +575,16 @@ namespace WifiHotspot
 
         private HotspotResult StopLegacy()
         {
-            var adapters = _ics.GetSharingAdapters();
-            foreach (var id in adapters)
-                _ics.DisableSharing(id);
+            if (!string.IsNullOrEmpty(_activeUpstreamId))
+                _ics.DisableSharing(_activeUpstreamId);
+            else
+            {
+                var adapters = _ics.GetSharingAdapters();
+                foreach (var id in adapters)
+                    _ics.DisableSharing(id);
+            }
+            _activeUpstreamId = null;
+            _activePrivateId = null;
 
             var r = RunCommand("netsh", "wlan stop hostednetwork");
             if (r.Success)

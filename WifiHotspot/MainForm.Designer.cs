@@ -17,6 +17,8 @@ namespace WifiHotspot
         {
             this.components = new System.ComponentModel.Container();
             this.grpSettings = new System.Windows.Forms.GroupBox();
+            this.lblTopology = new System.Windows.Forms.Label();
+            this.cmbTopology = new System.Windows.Forms.ComboBox();
             this.lblSsid = new System.Windows.Forms.Label();
             this.txtSsid = new System.Windows.Forms.TextBox();
             this.lblPassword = new System.Windows.Forms.Label();
@@ -24,6 +26,9 @@ namespace WifiHotspot
             this.chkShowPassword = new System.Windows.Forms.CheckBox();
             this.lblAdapter = new System.Windows.Forms.Label();
             this.cmbAdapter = new System.Windows.Forms.ComboBox();
+            this.lblWirelessAdapter = new System.Windows.Forms.Label();
+            this.cmbWirelessAdapter = new System.Windows.Forms.ComboBox();
+            this.lblDirection = new System.Windows.Forms.Label();
             this.btnStart = new System.Windows.Forms.Button();
             this.btnStop = new System.Windows.Forms.Button();
             this.btnRefresh = new System.Windows.Forms.Button();
@@ -42,6 +47,8 @@ namespace WifiHotspot
             this.SuspendLayout();
 
             // grpSettings
+            this.grpSettings.Controls.Add(this.lblTopology);
+            this.grpSettings.Controls.Add(this.cmbTopology);
             this.grpSettings.Controls.Add(this.lblSsid);
             this.grpSettings.Controls.Add(this.txtSsid);
             this.grpSettings.Controls.Add(this.lblPassword);
@@ -49,76 +56,126 @@ namespace WifiHotspot
             this.grpSettings.Controls.Add(this.chkShowPassword);
             this.grpSettings.Controls.Add(this.lblAdapter);
             this.grpSettings.Controls.Add(this.cmbAdapter);
+            this.grpSettings.Controls.Add(this.lblWirelessAdapter);
+            this.grpSettings.Controls.Add(this.cmbWirelessAdapter);
+            this.grpSettings.Controls.Add(this.lblDirection);
             this.grpSettings.Controls.Add(this.btnProxy);
             this.grpSettings.Location = new System.Drawing.Point(12, 12);
             this.grpSettings.Name = "grpSettings";
-            this.grpSettings.Size = new System.Drawing.Size(460, 145);
+            this.grpSettings.Size = new System.Drawing.Size(460, 225);
             this.grpSettings.TabIndex = 0;
             this.grpSettings.TabStop = false;
             this.grpSettings.Text = "热点设置";
 
+            // lblTopology
+            this.lblTopology.AutoSize = true;
+            this.lblTopology.Location = new System.Drawing.Point(15, 28);
+            this.lblTopology.Name = "lblTopology";
+            this.lblTopology.Size = new System.Drawing.Size(95, 17);
+            this.lblTopology.TabIndex = 0;
+            this.lblTopology.Text = "网络拓扑:";
+
+            // cmbTopology
+            this.cmbTopology.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
+            this.cmbTopology.FormattingEnabled = true;
+            this.cmbTopology.Items.AddRange(new object[] {
+            "自动（当前行为）",
+            "有线入口 → 无线热点"});
+            this.cmbTopology.Location = new System.Drawing.Point(120, 25);
+            this.cmbTopology.Name = "cmbTopology";
+            this.cmbTopology.Size = new System.Drawing.Size(205, 23);
+            this.cmbTopology.TabIndex = 1;
+            this.cmbTopology.SelectedIndex = 0;
+            this.cmbTopology.SelectedIndexChanged += new System.EventHandler(this.cmbTopology_SelectedIndexChanged);
+
             // lblSsid
             this.lblSsid.AutoSize = true;
-            this.lblSsid.Location = new System.Drawing.Point(15, 28);
+            this.lblSsid.Location = new System.Drawing.Point(15, 63);
             this.lblSsid.Name = "lblSsid";
             this.lblSsid.Size = new System.Drawing.Size(95, 17);
-            this.lblSsid.TabIndex = 0;
+            this.lblSsid.TabIndex = 2;
             this.lblSsid.Text = "网络名称 (SSID):";
 
             // txtSsid
-            this.txtSsid.Location = new System.Drawing.Point(120, 25);
+            this.txtSsid.Location = new System.Drawing.Point(120, 60);
             this.txtSsid.MaxLength = 32;
             this.txtSsid.Name = "txtSsid";
             this.txtSsid.Size = new System.Drawing.Size(320, 23);
-            this.txtSsid.TabIndex = 1;
+            this.txtSsid.TabIndex = 3;
 
             // lblPassword
             this.lblPassword.AutoSize = true;
-            this.lblPassword.Location = new System.Drawing.Point(15, 63);
+            this.lblPassword.Location = new System.Drawing.Point(15, 98);
             this.lblPassword.Name = "lblPassword";
             this.lblPassword.Size = new System.Drawing.Size(40, 17);
-            this.lblPassword.TabIndex = 2;
+            this.lblPassword.TabIndex = 4;
             this.lblPassword.Text = "密码:";
 
             // txtPassword
-            this.txtPassword.Location = new System.Drawing.Point(120, 60);
+            this.txtPassword.Location = new System.Drawing.Point(120, 95);
             this.txtPassword.MaxLength = 63;
             this.txtPassword.Name = "txtPassword";
             this.txtPassword.PasswordChar = '*';
             this.txtPassword.Size = new System.Drawing.Size(265, 23);
-            this.txtPassword.TabIndex = 3;
+            this.txtPassword.TabIndex = 5;
 
             // chkShowPassword
             this.chkShowPassword.AutoSize = true;
-            this.chkShowPassword.Location = new System.Drawing.Point(392, 62);
+            this.chkShowPassword.Location = new System.Drawing.Point(392, 97);
             this.chkShowPassword.Name = "chkShowPassword";
             this.chkShowPassword.Size = new System.Drawing.Size(60, 21);
-            this.chkShowPassword.TabIndex = 4;
+            this.chkShowPassword.TabIndex = 6;
             this.chkShowPassword.Text = "显示";
             this.chkShowPassword.UseVisualStyleBackColor = true;
             this.chkShowPassword.CheckedChanged += new System.EventHandler(this.chkShowPassword_CheckedChanged);
 
             // lblAdapter
             this.lblAdapter.AutoSize = true;
-            this.lblAdapter.Location = new System.Drawing.Point(15, 100);
+            this.lblAdapter.Location = new System.Drawing.Point(15, 133);
             this.lblAdapter.Name = "lblAdapter";
             this.lblAdapter.Size = new System.Drawing.Size(68, 17);
-            this.lblAdapter.TabIndex = 5;
+            this.lblAdapter.TabIndex = 7;
             this.lblAdapter.Text = "共享网络:";
 
             // cmbAdapter
             this.cmbAdapter.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
             this.cmbAdapter.FormattingEnabled = true;
-            this.cmbAdapter.Location = new System.Drawing.Point(120, 97);
+            this.cmbAdapter.Location = new System.Drawing.Point(120, 130);
             this.cmbAdapter.Name = "cmbAdapter";
             this.cmbAdapter.Size = new System.Drawing.Size(205, 23);
-            this.cmbAdapter.TabIndex = 6;
+            this.cmbAdapter.TabIndex = 8;
+
+            // lblWirelessAdapter
+            this.lblWirelessAdapter.AutoSize = true;
+            this.lblWirelessAdapter.Location = new System.Drawing.Point(15, 168);
+            this.lblWirelessAdapter.Name = "lblWirelessAdapter";
+            this.lblWirelessAdapter.Size = new System.Drawing.Size(86, 17);
+            this.lblWirelessAdapter.TabIndex = 9;
+            this.lblWirelessAdapter.Text = "无线热点网卡:";
+            this.lblWirelessAdapter.Visible = false;
+
+            // cmbWirelessAdapter
+            this.cmbWirelessAdapter.DropDownStyle = System.Windows.Forms.ComboBoxStyle.DropDownList;
+            this.cmbWirelessAdapter.FormattingEnabled = true;
+            this.cmbWirelessAdapter.Location = new System.Drawing.Point(120, 165);
+            this.cmbWirelessAdapter.Name = "cmbWirelessAdapter";
+            this.cmbWirelessAdapter.Size = new System.Drawing.Size(205, 23);
+            this.cmbWirelessAdapter.TabIndex = 10;
+            this.cmbWirelessAdapter.Visible = false;
+
+            // lblDirection
+            this.lblDirection.AutoSize = false;
+            this.lblDirection.Location = new System.Drawing.Point(15, 195);
+            this.lblDirection.Name = "lblDirection";
+            this.lblDirection.Size = new System.Drawing.Size(430, 20);
+            this.lblDirection.TabIndex = 11;
+            this.lblDirection.Visible = false;
 
             // btnStart
             this.btnStart.BackColor = System.Drawing.Color.FromArgb(25, 135, 84);
             this.btnStart.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
             this.btnStart.ForeColor = System.Drawing.Color.White;
-            this.btnStart.Location = new System.Drawing.Point(12, 163);
+            this.btnStart.Location = new System.Drawing.Point(12, 243);
             this.btnStart.Name = "btnStart";
             this.btnStart.Size = new System.Drawing.Size(105, 35);
             this.btnStart.TabIndex = 7;
@@ -130,7 +187,7 @@ namespace WifiHotspot
             this.btnStop.BackColor = System.Drawing.Color.FromArgb(220, 53, 69);
             this.btnStop.FlatStyle = System.Windows.Forms.FlatStyle.Flat;
             this.btnStop.ForeColor = System.Drawing.Color.White;
-            this.btnStop.Location = new System.Drawing.Point(123, 163);
+            this.btnStop.Location = new System.Drawing.Point(123, 243);
             this.btnStop.Name = "btnStop";
             this.btnStop.Size = new System.Drawing.Size(105, 35);
             this.btnStop.TabIndex = 8;
@@ -139,7 +196,7 @@ namespace WifiHotspot
             this.btnStop.Click += new System.EventHandler(this.btnStop_Click);
 
             // btnRefresh
-            this.btnRefresh.Location = new System.Drawing.Point(234, 163);
+            this.btnRefresh.Location = new System.Drawing.Point(234, 243);
             this.btnRefresh.Name = "btnRefresh";
             this.btnRefresh.Size = new System.Drawing.Size(105, 35);
             this.btnRefresh.TabIndex = 9;
@@ -148,7 +205,7 @@ namespace WifiHotspot
             this.btnRefresh.Click += new System.EventHandler(this.btnRefresh_Click);
 
             // btnSave
-            this.btnSave.Location = new System.Drawing.Point(345, 163);
+            this.btnSave.Location = new System.Drawing.Point(345, 243);
             this.btnSave.Name = "btnSave";
             this.btnSave.Size = new System.Drawing.Size(127, 35);
             this.btnSave.TabIndex = 10;
@@ -157,17 +214,17 @@ namespace WifiHotspot
             this.btnSave.Click += new System.EventHandler(this.btnSave_Click);
 
             // btnProxy
-            this.btnProxy.Location = new System.Drawing.Point(330, 97);
+            this.btnProxy.Location = new System.Drawing.Point(330, 130);
             this.btnProxy.Name = "btnProxy";
             this.btnProxy.Size = new System.Drawing.Size(110, 23);
-            this.btnProxy.TabIndex = 11;
+            this.btnProxy.TabIndex = 12;
             this.btnProxy.Text = "代理功能";
             this.btnProxy.UseVisualStyleBackColor = true;
             this.btnProxy.Click += new System.EventHandler(this.btnProxy_Click);
 
             // grpStatus
             this.grpStatus.Controls.Add(this.lblStatus);
-            this.grpStatus.Location = new System.Drawing.Point(12, 204);
+            this.grpStatus.Location = new System.Drawing.Point(12, 285);
             this.grpStatus.Name = "grpStatus";
             this.grpStatus.Size = new System.Drawing.Size(460, 80);
             this.grpStatus.TabIndex = 11;
@@ -185,7 +242,7 @@ namespace WifiHotspot
             // grpClients
             this.grpClients.Controls.Add(this.lstClients);
             this.grpClients.Controls.Add(this.btnRefreshClients);
-            this.grpClients.Location = new System.Drawing.Point(12, 290);
+            this.grpClients.Location = new System.Drawing.Point(12, 371);
             this.grpClients.Name = "grpClients";
             this.grpClients.Size = new System.Drawing.Size(460, 160);
             this.grpClients.TabIndex = 12;
@@ -211,7 +268,7 @@ namespace WifiHotspot
             // lblFooter
             this.lblFooter.AutoSize = true;
             this.lblFooter.ForeColor = System.Drawing.Color.Gray;
-            this.lblFooter.Location = new System.Drawing.Point(15, 455);
+            this.lblFooter.Location = new System.Drawing.Point(15, 536);
             this.lblFooter.Name = "lblFooter";
             this.lblFooter.Size = new System.Drawing.Size(440, 17);
             this.lblFooter.TabIndex = 13;
@@ -224,7 +281,7 @@ namespace WifiHotspot
             // MainForm
             this.AutoScaleDimensions = new System.Drawing.SizeF(8F, 16F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
-            this.ClientSize = new System.Drawing.Size(484, 480);
+            this.ClientSize = new System.Drawing.Size(484, 560);
             this.Controls.Add(this.grpSettings);
             this.Controls.Add(this.btnStart);
             this.Controls.Add(this.btnStop);
@@ -251,6 +308,8 @@ namespace WifiHotspot
         #endregion
 
         private System.Windows.Forms.GroupBox grpSettings;
+        private System.Windows.Forms.Label lblTopology;
+        private System.Windows.Forms.ComboBox cmbTopology;
         private System.Windows.Forms.Label lblSsid;
         private System.Windows.Forms.TextBox txtSsid;
         private System.Windows.Forms.Label lblPassword;
@@ -258,6 +317,9 @@ namespace WifiHotspot
         private System.Windows.Forms.CheckBox chkShowPassword;
         private System.Windows.Forms.Label lblAdapter;
         private System.Windows.Forms.ComboBox cmbAdapter;
+        private System.Windows.Forms.Label lblWirelessAdapter;
+        private System.Windows.Forms.ComboBox cmbWirelessAdapter;
+        private System.Windows.Forms.Label lblDirection;
         private System.Windows.Forms.Button btnStart;
         private System.Windows.Forms.Button btnStop;
         private System.Windows.Forms.Button btnRefresh;

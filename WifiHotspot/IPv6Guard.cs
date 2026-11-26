@@ -36,7 +36,7 @@ namespace WifiHotspot
             return value != "allow";
         }
 
-        public static HotspotResult Start(string policy)
+        public static HotspotResult Start(string policy, int interfaceIndex = 0)
         {
             if (!IsEnabled(policy))
             {
@@ -63,6 +63,7 @@ namespace WifiHotspot
             string filter = activePolicy == "ula-only"
                 ? "ipv6 and not ((ipv6.SrcAddr >= fd00:: and ipv6.SrcAddr <= fdff:ffff:ffff:ffff:ffff:ffff:ffff:ffff and ipv6.DstAddr >= fd00:: and ipv6.DstAddr <= fdff:ffff:ffff:ffff:ffff:ffff:ffff:ffff) or (ipv6.SrcAddr >= fe80:: and ipv6.SrcAddr <= febf:ffff:ffff:ffff:ffff:ffff:ffff:ffff and ipv6.DstAddr >= fe80:: and ipv6.DstAddr <= febf:ffff:ffff:ffff:ffff:ffff:ffff:ffff))"
                 : "ipv6";
+            if (interfaceIndex > 0) filter = "ifIdx == " + interfaceIndex + " and (" + filter + ")";
             IntPtr handle = IntPtr.Zero;
             try
             {
@@ -82,9 +83,10 @@ namespace WifiHotspot
 
             _handle = handle;
             _running = true;
-            _lastMessage = activePolicy == "ula-only"
+            string scope = interfaceIndex > 0 ? "，仅热点接口 ifIdx=" + interfaceIndex : "，全局";
+            _lastMessage = (activePolicy == "ula-only"
                 ? "IPv6 转发封禁已启动（仅允许 ULA/Link-local）"
-                : "IPv6 转发封禁已启动（丢弃全部转发 IPv6）";
+                : "IPv6 转发封禁已启动（丢弃全部转发 IPv6）") + scope;
             return new HotspotResult { Success = true, Message = _lastMessage };
         }
 
