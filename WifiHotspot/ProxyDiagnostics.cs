@@ -220,7 +220,7 @@ namespace WifiHotspot
                 lines.Add("[错误] 已启用 TTL/DNS 跳数与端口监控，但 WinDivert.dll / WinDivert32.sys / WinDivert64.sys 不完整。");
             string monitorMessage = TrafficMonitor.Shared.LastMessage ?? string.Empty;
             if (!TrafficMonitor.Shared.IsRunning && monitorMessage.Contains("错误码 3"))
-                lines.Add("[错误] WinDivert 驱动服务路径异常（ERROR_PATH_NOT_FOUND/3），当前核心监控未运行。请以管理员运行 `sc stop WinDivert`、`sc delete WinDivert` 后重启电脑，并确认三个 WinDivert 文件齐全且未被安全软件隔离。");
+                lines.Add("[错误] WinDivert 驱动服务路径异常（ERROR_PATH_NOT_FOUND/3），当前核心监控未运行。程序已尝试自动清理残留服务；若未恢复，请管理员运行 `sc qc WinDivert` 查看 BINARY_PATH_NAME，再执行 `sc stop WinDivert`、`sc delete WinDivert` 后重启。文件齐全时通常正是旧服务路径导致，不表示当前目录缺文件。");
             else if (!TrafficMonitor.Shared.IsRunning && monitorMessage.Contains("错误码 1450"))
                 lines.Add("[错误] WinDivert 资源耗尽（1450），核心监控未运行。请关闭其他 WinDivert/Clash/TUN 工具后重启电脑。");
             else if (!TrafficMonitor.Shared.IsRunning && monitorMessage.Contains("错误码 87"))

@@ -34,7 +34,7 @@
 - 探针日志面板实时滚动显示 Captive 拦截、DNS 规范化、未知 UDP 丢弃事件；一键连通性测试通过本地回显探针验证 HTTP Header 改写，并检查 TUN 默认路由与 IPv6 裸露风险
 - 代理自动诊断：启动失败时自动检查 `config.json`、端口格式/占用/Windows 保留端口范围、退出码、进程输出与 `probe.log`，给出端口/权限/文件/TUN 出口网卡等具体原因；代理功能窗口提供“自动诊断”按钮；一键测试会比对配置生成号与代理 `/status`，发现旧进程时自动重启并显示版本/路径；`probe.log` 被代理占用时日志面板与诊断改为共享读
 - 网络层指纹归一化：基于 WinDivert 在 Windows 网卡出口强制重写 IPv4 TTL/IPID、IPv6 Hop Limit 与 traffic class/Flow Label 清零、TCP SYN 选项；Flow Label 清零只用于指纹收敛，不代表 IPv6 隐私安全；已随包附带官方 WinDivert 2.2.2 x86 `WinDivert.dll`、`WinDivert32.sys`、`WinDivert64.sys`，需管理员权限
-- 核心监控容错：`ip or ipv6` 过滤器打开失败（如错误码 3/87）时自动降级为 DNS-only UDP:53 只读监控；仍失败时明确提示驱动服务/文件/权限原因与 `sc stop WinDivert`、`sc delete WinDivert` 恢复步骤，自动诊断也会识别该错误。
+- 核心监控容错：`ip or ipv6` 过滤器打开失败（如错误码 3/87）时自动降级为 DNS-only UDP:53 只读监控；错误码 3 会进一步读取 `sc qc WinDivert` 的驱动路径，发现旧路径/失效服务时自动 `sc stop WinDivert`、`sc delete WinDivert` 并重试，仍失败时输出具体路径与恢复步骤，自动诊断同步识别。
 - 核心监控（只读）：WinDivert `SNIFF` 模式旁路记录手机→电脑与 NAT 后电脑→网关的同流 TTL/Hop Limit，出现 `64 → 63` 时在 `probe.log` 写入 `[TTL证据]`；代理侧记录原始/改写后 HTTP User-Agent，并被动解析 HTTPS ClientHello 的 SNI 与 JA3（不 MITM、不改包）；WinDivert 只读 sniff UDP:53，区分“手机未发出查询/电脑未收到”“电脑已收到但代理未转发”“已返回手机”；DNS 与 TTL 共用单个 WinDivert 只读句柄，避免多句柄触发错误 1450。全局 TUN 接管时 TTL 由 TUN 自身归一化，跳过 WinDivert TTL 监控，但 UDP:53 监控仍运行。若 90 秒内出现多次手机 UA 与电脑流量混杂且随后断开，会写入 `[监控证据]` 供自动诊断定位认证网关应用层指纹匹配
 - 内嵌 DNS 服务：在全局 TUN / Linux redirect 的 UDP:53 拦截路径生效；手机 DNS 查询先查本地缓存（支持 TTL 递减、负缓存与容量上限），未命中时通过电脑物理网卡配置的 DNS 上游查询，按现有规则归一化 TTL/EDNS 后返回手机；GUI 可一键从出口网卡读取 IPv4 DNS，`force_tcp` 改为代理到上游使用 TCP 而不是让手机重试。ICS 原生模式下 53 由 Windows ICS 占用，需开启全局 TUN 才能让内嵌 DNS 接手
 - Wintun 全局 TUN 接管：创建 `OneNetShare Tunnel` 虚拟网卡，只接管 IPv4 默认路由/DNS，在用户态重建 UDP/DNS/NTP 会话并统一出口包指纹，TCP 80 流同样应用 HTTP Header 画像；需要官方 x86 `wintun.dll` 和管理员权限

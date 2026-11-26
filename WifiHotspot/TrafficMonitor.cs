@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Net;
 using System.Net.NetworkInformation;
@@ -111,10 +112,81 @@ namespace WifiHotspot
             return handle;
         }
 
+        private static string RunSc(string arguments, out int exitCode)
+        {
+            exitCode = -1;
+            try
+            {
+                var start = new ProcessStartInfo("sc.exe", arguments)
+                {
+                    CreateNoWindow = true,
+                    RedirectStandardError = true,
+                    RedirectStandardOutput = true,
+                    UseShellExecute = false
+                };
+                using (var process = Process.Start(start))
+                {
+                    string output = process.StandardOutput.ReadToEnd() + process.StandardError.ReadToEnd();
+                    process.WaitForExit();
+                    exitCode = process.ExitCode;
+                    return output.Trim();
+                }
+            }
+            catch (Exception ex)
+            {
+                return ex.Message;
+            }
+        }
+
+        private static string ParseServicePath(string query)
+        {
+            foreach (string line in (query ?? string.Empty).Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                int marker = line.IndexOf("BINARY_PATH_NAME", StringComparison.OrdinalIgnoreCase);
+                if (marker < 0) continue;
+                int colon = line.IndexOf(':', marker + "BINARY_PATH_NAME".Length);
+                if (colon < 0) continue;
+                return line.Substring(colon + 1).Trim();
+            }
+            return string.Empty;
+        }
+
+        private static bool TryRepairWinDivertService(out string detail)
+        {
+            int queryCode;
+            string query = RunSc("qc WinDivert", out queryCode);
+            if (queryCode != 0)
+            {
+                detail = "WinDivert 服务不存在或无法查询（sc qc 退出码 " + queryCode + "）";
+                return false;
+            }
+            string path = ParseServicePath(query);
+            string appDir = AppDomain.CurrentDomain.BaseDirectory.TrimEnd('\\', '/');
+            bool stale = string.IsNullOrEmpty(path) || !File.Exists(path) ||
+                         !path.StartsWith(appDir, StringComparison.OrdinalIgnoreCase);
+            if (!stale)
+            {
+                detail = "WinDivert 服务存在且驱动路径有效（" + path + "），仍需重启以释放残留驱动状态";
+                return false;
+            }
+            int stopCode;
+            RunSc("stop WinDivert", out stopCode);
+            int deleteCode;
+            string delete = RunSc("delete WinDivert", out deleteCode);
+            if (deleteCode != 0 && !delete.Contains("1060") && !delete.Contains("not exist"))
+            {
+                detail = "删除残留 WinDivert 服务失败：" + delete;
+                return false;
+            }
+            detail = "已自动删除残留 WinDivert 服务（原驱动路径: " +
+                     (string.IsNullOrEmpty(path) ? "<空>" : path) + "），将由 WinDivertOpen 重新注册";
+            return true;
+        }
+
         public static string ErrorHint(int error)
         {
             if (error == 3)
-                return "错误码 3 (ERROR_PATH_NOT_FOUND)：WinDivert 驱动服务路径/驱动文件异常，或残留的旧驱动服务占用。请以管理员运行 `sc stop WinDivert`、`sc delete WinDivert` 后重启电脑；确认程序目录同时存在 WinDivert.dll、WinDivert32.sys、WinDivert64.sys，且未被安全软件隔离。";
+                return "错误码 3 (ERROR_PATH_NOT_FOUND)：通常是残留 WinDivert 服务的 BINARY_PATH_NAME 指向旧目录/旧驱动，不是当前程序目录缺文件。程序已尝试自动删除该服务；若仍失败，请以管理员运行 `sc stop WinDivert`、`sc delete WinDivert` 后重启电脑。`sc qc WinDivert` 可查看残留路径。";
             if (error == 2)
                 return "错误码 2 (ERROR_FILE_NOT_FOUND)：缺少 WinDivert32.sys / WinDivert64.sys，请重新解压完整发行包并确认三个 WinDivert 文件在同一目录。";
             if (error == 5)
@@ -160,8 +232,11 @@ namespace WifiHotspot
             }
 
             string dnsFilter = "udp.SrcPort == 53 or udp.DstPort == 53";
-            string filter = ttl ? "ip or ipv6" : dnsFilter;
+            string ttlFilter = "ip or ipv6";
+            string filter = ttl ? ttlFilter : dnsFilter;
             int error = 0;
+            bool repaired = false;
+            string repairDetail = string.Empty;
             try
             {
                 _handle = OpenSniff(filter, out error);
@@ -173,9 +248,34 @@ namespace WifiHotspot
                     _handle = OpenSniff(filter, out error);
                     if (_handle != IntPtr.Zero && _handle != new IntPtr(-1)) ttl = false;
                 }
+                if ((_handle == IntPtr.Zero || _handle == new IntPtr(-1)) && error == 3)
+                {
+                    string detail;
+                    if (TryRepairWinDivertService(out detail))
+                    {
+                        repaired = true;
+                        repairDetail = detail;
+                        WriteProbe("[probe][监控] " + detail + "，重试 WinDivertOpen");
+                        filter = ttl ? ttlFilter : dnsFilter;
+                        _handle = OpenSniff(filter, out error);
+                        if ((_handle == IntPtr.Zero || _handle == new IntPtr(-1)) && ttl && dns)
+                        {
+                            filter = dnsFilter;
+                            _handle = OpenSniff(filter, out error);
+                            if (_handle != IntPtr.Zero && _handle != new IntPtr(-1)) ttl = false;
+                        }
+                    }
+                    else
+                    {
+                        repairDetail = detail;
+                        WriteProbe("[probe][监控] 自动修复 WinDivert 服务失败：" + detail);
+                    }
+                }
                 if (_handle == IntPtr.Zero || _handle == new IntPtr(-1))
                 {
-                    _lastMessage = "WinDivert sniff 打开失败，错误码 " + error + " filter=" + filter + "\n" + ErrorHint(error);
+                    _lastMessage = "WinDivert sniff 打开失败，错误码 " + error + " filter=" + filter +
+                                   (string.IsNullOrEmpty(repairDetail) ? string.Empty : "\n自动修复: " + repairDetail) +
+                                   "\n" + ErrorHint(error);
                     WriteProbe("[probe][监控] " + _lastMessage);
                     return new HotspotResult { Success = false, Message = _lastMessage };
                 }
@@ -205,7 +305,8 @@ namespace WifiHotspot
             _thread.Start();
             _lastMessage = "核心监控已启动（WinDivert 只读 sniff；TTL=" + (ttl ? "开" : "关") +
                            " DNS=" + (dns ? "开" : "关") + "）" +
-                           (!ttl && dns ? "；TTL 因 filter 打开失败已降级关闭" : string.Empty);
+                           (!ttl && dns ? "；TTL 因 filter 打开失败已降级关闭" : string.Empty) +
+                           (repaired ? "；" + repairDetail : string.Empty);
             WriteProbe("[probe][监控] " + _lastMessage);
             return new HotspotResult { Success = true, Message = _lastMessage };
         }
