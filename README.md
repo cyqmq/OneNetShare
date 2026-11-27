@@ -45,6 +45,8 @@
 - Captive 探针 Header 清理：HTTP 探测请求清除 `Referer`、`Origin`、`Accept*`、`Sec-Fetch-*`、`Priority`、`Upgrade-Insecure-Requests`，并把本机代理探针与 LAN/TUN 转发请求分别计数；`/status` 输出 `header_plane=local=... forward=... captive_scrub=... leak_scrub=...`，GUI 一键测试显示本机/转发两平面证据
 - 会话计时与运行时证据：GUI 显示最近热点启动耗时、停止时显示最近在线时长；代理 `/status` 输出 `runtime=uptime_seconds=... start_time=... config_reloads=... last_reload_age_seconds=...`
 - OpenWrt 运维：init 脚本改为 procd `respawn` watchdog，安装规则幂等，脚本提供 `status`/`reset-counters`，输出 nat/mangle/filter 计数器并检测 MTK HNAT/PPE 绕过风险
+- UI 响应优化：状态轮询与客户端列表查询移到后台线程，结果缓存后按变化批量刷新；探针日志按批追加并限制为 300 行，避免每次逐行解析 TextBox；设置窗口与诊断窗口构建时批量布局，减少启动/打开时的重排重绘
+- 关闭/停止时统一同步清理：先停止热点与 ICS，再停止代理进程、IPv6/Portal/出站 WinDivert 模块、TTL/DNS 监控、网络层归一化和计时，确保退出后不残留 `hotspot-proxy.exe` 或 WinDivert 句柄
 - 自动配置 ICS（Internet Connection Sharing）网络共享
 - 可自定义 SSID、密码（8-63 位 WPA2）
 - 选择用于共享上网的物理网卡；有线入口模式还可单独选择无线热点网卡

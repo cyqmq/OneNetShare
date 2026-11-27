@@ -67,12 +67,14 @@ namespace WifiHotspot
         private readonly TextBox txtProbeLog;
         private readonly System.Windows.Forms.Timer probeTimer;
         private long _probeLogOffset;
+        private int _probeLineCount;
         private readonly Label lblResult;
 
         public ProxySettingsForm()
         {
             _configPath = ProxyConfigManager.DefaultConfigPath;
             ProxySettings settings = ProxyConfigManager.Load(_configPath);
+            SuspendLayout();
 
             Text = "代理功能开关";
             StartPosition = FormStartPosition.CenterParent;
@@ -84,6 +86,7 @@ namespace WifiHotspot
             Font = new Font("Microsoft YaHei", 9F, FontStyle.Regular, GraphicsUnit.Point, 134);
 
             var content = new Panel { Dock = DockStyle.Fill, AutoScroll = true, AutoScrollMinSize = new Size(0, 1210) };
+            content.SuspendLayout();
             var implemented = new GroupBox { Text = "已实现功能", Location = new Point(12, 12), Size = new Size(640, 585) };
             var monitorGroup = new GroupBox { Text = "核心监控（只读，不改包）", Location = new Point(12, 600), Size = new Size(640, 125) };
             var missing = new GroupBox { Text = "未实现功能", Location = new Point(12, 735), Size = new Size(640, 100) };
@@ -294,12 +297,13 @@ namespace WifiHotspot
             var grpProbe = new GroupBox { Text = "探针日志 / 连通性测试", Location = new Point(12, 840), Size = new Size(640, 250) };
             txtProbeLog = new TextBox { Multiline = true, ReadOnly = true, Dock = DockStyle.Fill, ScrollBars = ScrollBars.Vertical, BackColor = Color.White, Font = new Font("Consolas", 9F) };
             var probePanel = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 44, FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(6, 6, 6, 6) };
+            probePanel.SuspendLayout();
             var btnTest = NewButton("一键连通性测试", 150);
             btnTest.Click += RunConnectivityTest;
             var btnDiagnose = NewButton("自动诊断", 108);
             btnDiagnose.Click += RunDiagnosis;
             var btnClearLog = NewButton("清空日志", 108);
-            btnClearLog.Click += delegate { txtProbeLog.Clear(); ResetProbeLogOffset(); };
+            btnClearLog.Click += delegate { ClearProbeLog(); ResetProbeLogOffset(); };
             probePanel.Controls.Add(btnClearLog);
             probePanel.Controls.Add(btnDiagnose);
             probePanel.Controls.Add(btnTest);
@@ -318,6 +322,7 @@ namespace WifiHotspot
             lblMonitorStatus.Text = MonitorStatusText();
 
             var panel = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 48, FlowDirection = FlowDirection.RightToLeft, WrapContents = false, Padding = new Padding(8, 8, 8, 8) };
+            panel.SuspendLayout();
             var btnClose = NewButton("关闭");
             btnClose.Click += delegate { Close(); };
             var btnOpen = NewButton("打开配置文件");
@@ -337,6 +342,9 @@ namespace WifiHotspot
             panel.Controls.Add(btnSaveOnly);
             panel.Controls.Add(btnSaveRestart);
 
+            probePanel.ResumeLayout(false);
+            content.ResumeLayout(false);
+            panel.ResumeLayout(false);
             content.Controls.Add(implemented);
             content.Controls.Add(monitorGroup);
             content.Controls.Add(missing);
@@ -344,6 +352,8 @@ namespace WifiHotspot
             content.Controls.Add(lblResult);
             Controls.Add(content);
             Controls.Add(panel);
+            ResumeLayout(false);
+            PerformLayout();
 
             probeTimer = new System.Windows.Forms.Timer { Interval = 800 };
             probeTimer.Tick += delegate { RefreshProbeLog(false); };
@@ -490,7 +500,7 @@ namespace WifiHotspot
             {
                 if (reset)
                 {
-                    txtProbeLog.Clear();
+                    ClearProbeLog();
                     _probeLogOffset = 0;
                 }
                 return;
@@ -502,7 +512,7 @@ namespace WifiHotspot
                 {
                     if (reset || stream.Length < _probeLogOffset)
                     {
-                        txtProbeLog.Clear();
+                        ClearProbeLog();
                         _probeLogOffset = 0;
                     }
                     if (stream.Length <= _probeLogOffset) return;
@@ -517,6 +527,7 @@ namespace WifiHotspot
                     }
                     _probeLogOffset += read;
                     string text = Encoding.UTF8.GetString(buffer, 0, read);
+                    var batch = new List<string>();
                     foreach (string line in text.Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries))
                     {
                         int marker = line.IndexOf("[probe]", StringComparison.OrdinalIgnoreCase);
@@ -528,8 +539,9 @@ namespace WifiHotspot
                             DateTime parsed;
                             if (DateTime.TryParse(line.Substring(0, 19), out parsed)) clock = parsed.ToString("HH:mm:ss");
                         }
-                        AppendProbeLine("[" + clock + "] " + message);
+                        batch.Add("[" + clock + "] " + message);
                     }
+                    AppendProbeLines(batch);
                 }
             }
             catch
@@ -538,18 +550,51 @@ namespace WifiHotspot
             }
         }
 
+        private void ClearProbeLog()
+        {
+            txtProbeLog.Clear();
+            _probeLineCount = 0;
+        }
+
         private void AppendProbeLine(string line)
         {
-            if (txtProbeLog.Lines.Length > 300)
+            AppendProbeLines(new List<string> { line });
+        }
+
+        private void AppendProbeLines(List<string> lines)
+        {
+            if (lines == null || lines.Count == 0) return;
+            bool atBottom = txtProbeLog.SelectionStart >= txtProbeLog.TextLength - 2;
+            int overflow = _probeLineCount + lines.Count - 300;
+            if (overflow > 0)
             {
-                string[] lines = txtProbeLog.Lines;
-                var keep = new List<string>();
-                for (int i = lines.Length - 250; i < lines.Length; i++) keep.Add(lines[i]);
-                txtProbeLog.Lines = keep.ToArray();
+                if (overflow >= _probeLineCount)
+                {
+                    txtProbeLog.Clear();
+                    _probeLineCount = 0;
+                }
+                else
+                {
+                    int offset = txtProbeLog.GetFirstCharIndexFromLine(overflow);
+                    if (offset < 0) offset = txtProbeLog.TextLength;
+                    txtProbeLog.Select(0, offset);
+                    txtProbeLog.SelectedText = string.Empty;
+                    _probeLineCount -= overflow;
+                }
             }
-            txtProbeLog.AppendText(line + Environment.NewLine);
-            txtProbeLog.SelectionStart = txtProbeLog.TextLength;
-            txtProbeLog.ScrollToCaret();
+            var sb = new StringBuilder();
+            for (int i = 0; i < lines.Count; i++)
+            {
+                if (i > 0) sb.AppendLine();
+                sb.Append(lines[i]);
+            }
+            txtProbeLog.AppendText(sb.ToString() + Environment.NewLine);
+            _probeLineCount += lines.Count;
+            if (atBottom)
+            {
+                txtProbeLog.SelectionStart = txtProbeLog.TextLength;
+                txtProbeLog.ScrollToCaret();
+            }
         }
 
         private void RunConnectivityTest(object sender, EventArgs e)

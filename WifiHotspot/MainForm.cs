@@ -5,6 +5,7 @@ using System.Drawing;
 using System.IO;
 using System.Net.NetworkInformation;
 using System.Text;
+using System.Threading;
 using System.Windows.Forms;
 
 namespace WifiHotspot
@@ -20,6 +21,22 @@ namespace WifiHotspot
         private string _savedAdapterId;
         private string _savedTopologyMode = "auto";
         private string _savedWirelessAdapterId;
+        private string _lastClientsKey;
+        private int _statusBusy;
+        private int _clientsBusy;
+        private bool _shuttingDown;
+
+        private class StatusSnapshot
+        {
+            public HotspotStatus Status;
+            public string Text;
+            public Color Color;
+            public bool StartEnabled;
+            public bool StopEnabled;
+            public bool Running;
+            public bool ClearClients;
+            public List<string> Clients;
+        }
 
         public MainForm()
         {
@@ -260,13 +277,58 @@ namespace WifiHotspot
 
         private void RefreshClients()
         {
-            lstClients.Items.Clear();
-            var clients = _manager.GetConnectedClients();
-            if (clients.Count == 0)
-                lstClients.Items.Add("暂无已连接设备");
-            else
-                foreach (var c in clients)
-                    lstClients.Items.Add(c);
+            if (_shuttingDown) return;
+            if (Interlocked.Exchange(ref _clientsBusy, 1) != 0) return;
+            ThreadPool.QueueUserWorkItem(delegate(object state)
+            {
+                List<string> clients = new List<string>();
+                try
+                {
+                    clients = _manager.GetConnectedClients();
+                }
+                catch
+                {
+                    clients = new List<string>();
+                }
+                try
+                {
+                    BeginInvoke(new Action(() => ApplyClients(clients, true)));
+                }
+                catch { }
+                finally
+                {
+                    Interlocked.Exchange(ref _clientsBusy, 0);
+                }
+            });
+        }
+
+        private void ApplyClients(List<string> clients, bool running)
+        {
+            if (_shuttingDown || IsDisposed) return;
+            if (!running)
+            {
+                _lastClientsKey = null;
+                if (lstClients.Items.Count > 0) lstClients.Items.Clear();
+                return;
+            }
+            if (clients == null) return;
+            string key = clients.Count == 0 ? "empty" : string.Join("\n", clients.ToArray());
+            if (key == _lastClientsKey) return;
+            _lastClientsKey = key;
+            lstClients.BeginUpdate();
+            try
+            {
+                lstClients.Items.Clear();
+                if (clients.Count == 0)
+                    lstClients.Items.Add("暂无已连接设备");
+                else
+                    foreach (var client in clients)
+                        lstClients.Items.Add(client);
+            }
+            finally
+            {
+                lstClients.EndUpdate();
+            }
         }
 
         private void btnStart_Click(object sender, EventArgs e)
@@ -294,7 +356,7 @@ namespace WifiHotspot
             btnStart.Enabled = false;
             lblStatus.ForeColor = Color.Blue;
             lblStatus.Text = "正在启动热点，请稍候...";
-            Application.DoEvents();
+            lblStatus.Refresh();
 
             HotspotTiming.BeginStart();
             HotspotResult result = IsWiredWifiMode()
@@ -388,31 +450,14 @@ namespace WifiHotspot
             btnStop.Enabled = false;
             lblStatus.ForeColor = Color.Blue;
             lblStatus.Text = "正在停止热点...";
-            Application.DoEvents();
+            lblStatus.Refresh();
 
-            var result = _manager.Stop();
-            if (result.Success)
-            {
-                string proxyMessage = string.Empty;
-                try
-                {
-                    ProxySettings settings = ProxyConfigManager.Load();
-                    if (settings.AutoStartProxy)
-                        proxyMessage = "\n" + ProxyProcessManager.Stop();
-                    if (settings.IPv6GuardEnabled || IPv6Guard.IsRunning)
-                        proxyMessage += "\n" + IPv6Guard.Stop().Message;
-                    proxyMessage += "\n" + PortalGuard.Stop().Message;
-                    if (settings.OutboundGuardEnabled || OutboundGuard.IsRunning)
-                        proxyMessage += "\n" + OutboundGuard.Stop().Message;
-                    if (settings.MonitorEnabled || TrafficMonitor.Shared.IsRunning || DnsMonitor.Shared.IsRunning)
-                        proxyMessage += "\n" + TrafficMonitor.Shared.Stop().Message;
-                }
-                catch { }
-                HotspotTiming.EndSession();
-                MessageBox.Show(result.Message + proxyMessage + "\n" + HotspotTiming.StatusText, "停止结果", MessageBoxButtons.OK, MessageBoxIcon.Information);
-            }
+            string cleanup = StopRuntimeComponents(true);
+            HotspotTiming.EndSession();
+            if (cleanup.IndexOf("失败", StringComparison.OrdinalIgnoreCase) < 0)
+                MessageBox.Show(cleanup + "\n" + HotspotTiming.StatusText, "停止结果", MessageBoxButtons.OK, MessageBoxIcon.Information);
             else
-                ShowHotspotDiagnosis(result.Message, null);
+                ShowHotspotDiagnosis(cleanup, null);
 
             lstClients.Items.Clear();
             CheckSupportAndStatus();
@@ -472,9 +517,45 @@ namespace WifiHotspot
 
         private void MainForm_FormClosing(object sender, FormClosingEventArgs e)
         {
-            try { NetworkNormalizer.Shared.Stop(); } catch { }
-            try { TrafficMonitor.Shared.Stop(); } catch { }
-            try { DnsMonitor.Shared.Stop(); } catch { }
+            if (_shuttingDown) return;
+            _shuttingDown = true;
+            timerStatus.Stop();
+            for (int i = 0; i < 100 && (Volatile.Read(ref _statusBusy) != 0 || Volatile.Read(ref _clientsBusy) != 0); i++)
+                Thread.Sleep(20);
+            StopRuntimeComponents(true);
+            HotspotTiming.EndSession();
+        }
+
+        private string StopRuntimeComponents(bool stopHotspot)
+        {
+            var messages = new List<string>();
+            if (stopHotspot)
+            {
+                try
+                {
+                    var result = _manager.Stop();
+                    messages.Add(result.Success ? result.Message : "热点停止失败: " + result.Message);
+                }
+                catch (Exception ex)
+                {
+                    messages.Add("热点停止失败: " + ex.Message);
+                }
+            }
+            try { messages.Add(ProxyProcessManager.Stop()); }
+            catch (Exception ex) { messages.Add("代理停止失败: " + ex.Message); }
+            try { messages.Add(IPv6Guard.Stop().Message); }
+            catch (Exception ex) { messages.Add("IPv6 封禁停止失败: " + ex.Message); }
+            try { messages.Add(PortalGuard.Stop().Message); }
+            catch (Exception ex) { messages.Add("Portal 封堵停止失败: " + ex.Message); }
+            try { messages.Add(OutboundGuard.Stop().Message); }
+            catch (Exception ex) { messages.Add("出站封堵停止失败: " + ex.Message); }
+            try { messages.Add(TrafficMonitor.Shared.Stop().Message); }
+            catch (Exception ex) { messages.Add("核心监控停止失败: " + ex.Message); }
+            try { messages.Add(DnsMonitor.Shared.Stop().Message); }
+            catch (Exception ex) { messages.Add("DNS 监控停止失败: " + ex.Message); }
+            try { messages.Add(NetworkNormalizer.Shared.Stop().Message); }
+            catch (Exception ex) { messages.Add("网络层归一化停止失败: " + ex.Message); }
+            return string.Join("\n", messages.ToArray());
         }
 
         private void btnSave_Click(object sender, EventArgs e)
@@ -516,35 +597,61 @@ namespace WifiHotspot
 
         private void timerStatus_Tick(object sender, EventArgs e)
         {
-            string detail;
-            HotspotStatus status = _manager.GetStatus(out detail);
-            bool isAdmin = HotspotManager.IsAdministrator();
-            string moduleState = ModuleStatusText();
+            if (_shuttingDown) return;
+            if (Interlocked.Exchange(ref _statusBusy, 1) != 0) return;
+            string ssid = txtSsid.Text;
+            string topology = TopologyText();
+            ThreadPool.QueueUserWorkItem(delegate(object state)
+            {
+                var snapshot = new StatusSnapshot();
+                try
+                {
+                    string detail;
+                    snapshot.Status = _manager.GetStatus(out detail);
+                    bool isAdmin = HotspotManager.IsAdministrator();
+                    string moduleState = ModuleStatusText();
+                    snapshot.Running = snapshot.Status == HotspotStatus.Running;
+                    snapshot.ClearClients = !snapshot.Running;
+                    snapshot.Color = snapshot.Status == HotspotStatus.Running ? Color.Green
+                        : snapshot.Status == HotspotStatus.Stopped ? Color.DarkOrange : Color.Red;
+                    string failure = snapshot.Status == HotspotStatus.Running || snapshot.Status == HotspotStatus.Stopped
+                        ? string.Empty : "\n状态检测失败，可尝试启动/停止";
+                    string ssidLine = snapshot.Status == HotspotStatus.Running ? "\nSSID: " + ssid : string.Empty;
+                    snapshot.Text = "热点状态: " + detail + ssidLine + "\n拓扑: " + topology + failure + "\n代理/网络层/TTL/DNS: " + moduleState;
+                    snapshot.StartEnabled = isAdmin && snapshot.Status != HotspotStatus.Running;
+                    snapshot.StopEnabled = isAdmin && snapshot.Status != HotspotStatus.Stopped;
+                    if (snapshot.Running) snapshot.Clients = _manager.GetConnectedClients();
+                }
+                catch
+                {
+                    snapshot.Status = HotspotStatus.Error;
+                    snapshot.Color = Color.Red;
+                    snapshot.Text = "热点状态: 状态检测失败，可尝试启动/停止";
+                    snapshot.StartEnabled = true;
+                    snapshot.StopEnabled = true;
+                    snapshot.ClearClients = true;
+                }
+                try
+                {
+                    BeginInvoke(new Action(() => ApplyStatusSnapshot(snapshot)));
+                }
+                catch { }
+                finally
+                {
+                    Interlocked.Exchange(ref _statusBusy, 0);
+                }
+            });
+        }
 
-            if (status == HotspotStatus.Running)
-            {
-                lblStatus.ForeColor = Color.Green;
-                lblStatus.Text = "热点状态: " + detail + "\nSSID: " + txtSsid.Text + "\n拓扑: " + TopologyText() + "\n代理/网络层/TTL/DNS: " + moduleState;
-                btnStart.Enabled = false;
-                btnStop.Enabled = isAdmin;
-                RefreshClients();
-            }
-            else if (status == HotspotStatus.Stopped)
-            {
-                lblStatus.ForeColor = Color.DarkOrange;
-                lblStatus.Text = "热点状态: " + detail + "\n拓扑: " + TopologyText() + "\n代理/网络层/TTL/DNS: " + moduleState;
-                btnStart.Enabled = isAdmin;
-                btnStop.Enabled = false;
-                lstClients.Items.Clear();
-            }
-            else
-            {
-                lblStatus.ForeColor = Color.Red;
-                lblStatus.Text = "热点状态: " + detail + "\n拓扑: " + TopologyText() + "\n状态检测失败，可尝试启动/停止\n代理/网络层/TTL/DNS: " + moduleState;
-                btnStart.Enabled = isAdmin;
-                btnStop.Enabled = isAdmin;
-                lstClients.Items.Clear();
-            }
+        private void ApplyStatusSnapshot(StatusSnapshot snapshot)
+        {
+            if (_shuttingDown || snapshot == null || IsDisposed) return;
+            lblStatus.ForeColor = snapshot.Color;
+            if (lblStatus.Text != snapshot.Text) lblStatus.Text = snapshot.Text;
+            btnStart.Enabled = snapshot.StartEnabled;
+            btnStop.Enabled = snapshot.StopEnabled;
+            ApplyClients(snapshot.Clients, snapshot.Running);
+            if (snapshot.ClearClients) ApplyClients(null, false);
         }
     }
 }

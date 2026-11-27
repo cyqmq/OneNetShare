@@ -10,6 +10,7 @@ namespace WifiHotspot
     {
         public DiagnosisForm(HotspotDiagnosis diagnosis)
         {
+            SuspendLayout();
             Text = "热点问题诊断";
             StartPosition = FormStartPosition.CenterParent;
             FormBorderStyle = FormBorderStyle.FixedDialog;
@@ -55,6 +56,8 @@ namespace WifiHotspot
 
             Controls.Add(text);
             Controls.Add(panel);
+            ResumeLayout(false);
+            PerformLayout();
         }
 
         private static Button NewButton(string caption)
