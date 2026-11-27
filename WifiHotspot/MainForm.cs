@@ -246,9 +246,9 @@ namespace WifiHotspot
             lblStatus.Text = string.Format("热点状态: {0}\n支持检测: {1}\n代理/网络层/TTL/DNS: {2}", statusText, support.Message, ModuleStatusText());
         }
 
-        private void ShowHotspotDiagnosis(string message, IcsManager.NetworkAdapterInfo adapter)
+        private void ShowHotspotDiagnosis(string message, IcsManager.NetworkAdapterInfo adapter, IcsManager.NetworkAdapterInfo wirelessAdapter = null)
         {
-            var diagnosis = _manager.Diagnose(message, adapter, txtSsid.Text, txtPassword.Text);
+            var diagnosis = _manager.Diagnose(message, adapter, txtSsid.Text, txtPassword.Text, wirelessAdapter);
             using (var form = new DiagnosisForm(diagnosis))
                 form.ShowDialog(this);
         }
@@ -359,7 +359,7 @@ namespace WifiHotspot
                 MessageBox.Show(result.Message + proxyMessage, "启动结果", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             else
-                ShowHotspotDiagnosis(result.Message, selected);
+                ShowHotspotDiagnosis(result.Message, selected, selectedWireless);
 
             CheckSupportAndStatus();
         }

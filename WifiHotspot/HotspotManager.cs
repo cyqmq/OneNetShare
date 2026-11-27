@@ -28,6 +28,13 @@ namespace WifiHotspot
         public string Message { get; set; }
     }
 
+    internal enum HostedNetworkState
+    {
+        Stopped,
+        Started,
+        Unknown
+    }
+
     public class HotspotManager
     {
         private readonly IcsManager _ics = new IcsManager();
@@ -210,7 +217,7 @@ namespace WifiHotspot
             return new HotspotResult { Success = false, Message = "未找到承载网络支持信息。\n驱动输出:\n" + output };
         }
 
-        public HotspotDiagnosis Diagnose(string rawError, IcsManager.NetworkAdapterInfo internetAdapter, string ssid, string password)
+        public HotspotDiagnosis Diagnose(string rawError, IcsManager.NetworkAdapterInfo internetAdapter, string ssid, string password, IcsManager.NetworkAdapterInfo wirelessAdapter = null)
         {
             var diagnosis = new HotspotDiagnosis { RawMessage = rawError ?? string.Empty };
 
@@ -270,6 +277,10 @@ namespace WifiHotspot
                     AddIssue(diagnosis, "移动热点状态读取失败", mobileDetail,
                         "设置 → 网络和 Internet → 移动热点 → 确认页面可正常打开。", "ms-settings:network-mobilehotspot");
 
+                if (mobileState == MobileHotspotState.On || mobileState == MobileHotspotState.InTransition)
+                    AddIssue(diagnosis, "系统移动热点占用无线网卡", mobileDetail + "；传统承载网络需要独占无线网卡。",
+                        "设置 → 网络和 Internet → 移动热点 → 关闭系统移动热点；或退出正在使用热点的其他软件后重试。", "ms-settings:network-mobilehotspot");
+
                 if (!mobileEnabled)
                     AddIssue(diagnosis, "移动热点能力被禁用", capability,
                         "设置 → 网络和 Internet → 移动热点；如由单位策略禁用，需要管理员在组策略中放开。", "ms-settings:network-mobilehotspot");
@@ -283,9 +294,11 @@ namespace WifiHotspot
                 AddIssue(diagnosis, "Internet Connection Sharing 服务未运行", "sc query icssvc 未显示正在运行。",
                     "services.msc → Internet Connection Sharing (ICS) → 启动，并将启动类型设为手动或自动。", "services.msc");
 
-            if (!HasEnabledWirelessAdapter())
-                AddIssue(diagnosis, "没有启用的无线网卡", "程序未找到处于工作状态的 Wireless80211 网卡。",
-                    "设置 → 网络和 Internet → Wi-Fi → 关闭飞行模式并打开 Wi-Fi；或在设备管理器中启用无线网卡。", "ms-settings:network-wifi");
+            bool selectedWirelessReady = wirelessAdapter == null || string.IsNullOrEmpty(wirelessAdapter.Id) ||
+                IsWirelessAdapterAdminEnabled(wirelessAdapter);
+            if (!selectedWirelessReady || !HasEnabledWirelessAdapter())
+                AddIssue(diagnosis, "没有启用的无线网卡", "程序未找到管理状态为已启用的 Wireless80211 网卡；未连接 Wi-Fi 不代表网卡被禁用。",
+                    "设备管理器 → 网络适配器 → 右键无线网卡 → 启用设备；或在设置 → 网络和 Internet → Wi-Fi 中打开 Wi-Fi。", "ms-settings:network-wifi");
 
             bool legacyRelevant = !MobileHotspotManager.IsAvailable ||
                 (rawError ?? string.Empty).IndexOf("承载网络", StringComparison.OrdinalIgnoreCase) >= 0 ||
@@ -321,11 +334,90 @@ namespace WifiHotspot
 
         private static bool HasEnabledWirelessAdapter()
         {
+            Dictionary<string, bool> adminStates = GetInterfaceAdminStates();
             foreach (var nic in NetworkInterface.GetAllNetworkInterfaces())
             {
                 if (nic.NetworkInterfaceType != NetworkInterfaceType.Wireless80211) continue;
-                if (nic.OperationalStatus != OperationalStatus.Down && nic.OperationalStatus != OperationalStatus.NotPresent)
-                    return true;
+                if (nic.OperationalStatus == OperationalStatus.NotPresent) continue;
+                bool enabled;
+                if (adminStates.TryGetValue(nic.Name, out enabled) && !enabled) continue;
+                return true;
+            }
+            return false;
+        }
+
+        private static bool IsWirelessAdapterAdminEnabled(IcsManager.NetworkAdapterInfo adapter)
+        {
+            if (adapter == null || string.IsNullOrEmpty(adapter.Name)) return true;
+
+            Dictionary<string, bool> states = GetInterfaceAdminStates();
+            bool enabled;
+            if (states.TryGetValue(adapter.Name, out enabled)) return enabled;
+
+            return true;
+        }
+
+        private static Dictionary<string, bool> GetInterfaceAdminStates()
+        {
+            var result = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+            var r = RunCommand("netsh", "interface show interface");
+            if (!r.Success || string.IsNullOrWhiteSpace(r.Message)) return result;
+
+            string[] lines = r.Message.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+            foreach (string nicName in GetWirelessAdapterNames())
+            {
+                foreach (string line in lines)
+                {
+                    if (line.IndexOf(nicName, StringComparison.OrdinalIgnoreCase) < 0) continue;
+                    bool enabled;
+                    if (TryParseInterfaceAdminState(line, out enabled))
+                        result[nicName] = enabled;
+                    break;
+                }
+            }
+            return result;
+        }
+
+        private static List<string> GetWirelessAdapterNames()
+        {
+            var names = new List<string>();
+            foreach (var nic in NetworkInterface.GetAllNetworkInterfaces())
+            {
+                if (nic.NetworkInterfaceType != NetworkInterfaceType.Wireless80211) continue;
+                if (!string.IsNullOrEmpty(nic.Name) &&
+                    !names.Exists(n => string.Equals(n, nic.Name, StringComparison.OrdinalIgnoreCase)))
+                    names.Add(nic.Name);
+            }
+            return names;
+        }
+
+        private static bool IsInterfaceAdminEnabled(string name, OperationalStatus status)
+        {
+            if (string.IsNullOrEmpty(name)) return status != OperationalStatus.NotPresent;
+
+            Dictionary<string, bool> states = GetInterfaceAdminStates();
+            bool enabled;
+            if (states.TryGetValue(name, out enabled)) return enabled;
+            return status != OperationalStatus.NotPresent;
+        }
+
+        private static bool TryParseInterfaceAdminState(string line, out bool enabled)
+        {
+            enabled = true;
+            if (string.IsNullOrWhiteSpace(line)) return false;
+
+            if (Regex.IsMatch(line, @"\bDisabled\b", RegexOptions.IgnoreCase) ||
+                line.Contains("已禁用") || line.Contains("禁用") || line.Contains("未启用"))
+            {
+                enabled = false;
+                return true;
+            }
+
+            if (Regex.IsMatch(line, @"\bEnabled\b", RegexOptions.IgnoreCase) ||
+                line.Contains("已启用") || line.Contains("启用"))
+            {
+                enabled = true;
+                return true;
             }
             return false;
         }
@@ -354,8 +446,8 @@ namespace WifiHotspot
 
             if (message.Contains("组或资源的状态不是执行请求操作的正确状态") ||
                 message.IndexOf("group or resource is not in the correct state", StringComparison.OrdinalIgnoreCase) >= 0)
-                AddIssue(diagnosis, "承载网络状态冲突", "Windows 承载网络处于不可启动状态，程序已尝试重置但仍失败。",
-                    "设置 → 网络和 Internet → 移动热点 → 关闭系统移动热点后重试；如被其他软件占用，退出该软件后重试。", "ms-settings:network-mobilehotspot");
+                AddIssue(diagnosis, "承载网络状态冲突", "Windows 承载网络处于不可启动状态，程序已尝试关闭系统移动热点并完整重置承载网络，但仍失败。",
+                    "设置 → 网络和 Internet → 移动热点 → 关闭系统移动热点；退出其他热点/虚拟网卡软件；设备管理器中禁用再启用无线网卡后重试。", "ms-settings:network-mobilehotspot");
         }
 
         public HotspotStatus GetStatus(out string detail)
@@ -436,6 +528,113 @@ namespace WifiHotspot
                    message.Contains("The group or resource is not in the correct state");
         }
 
+        private static bool ReleaseSystemMobileHotspot(out string detail)
+        {
+            detail = string.Empty;
+            if (!MobileHotspotManager.IsAvailable)
+            {
+                detail = "系统移动热点 API 不可用，跳过释放";
+                return true;
+            }
+
+            string stateDetail;
+            MobileHotspotState state = MobileHotspotManager.GetState(out stateDetail);
+            if (state == MobileHotspotState.Off)
+            {
+                detail = "系统移动热点已关闭";
+                return true;
+            }
+            if (state == MobileHotspotState.Unavailable)
+            {
+                detail = "系统移动热点无可用配置文件";
+                return true;
+            }
+
+            var stop = MobileHotspotManager.Stop();
+            var messages = new List<string>();
+            messages.Add("系统移动热点关闭: " + stop.Message);
+
+            for (int i = 0; i < 20; i++)
+            {
+                state = MobileHotspotManager.GetState(out stateDetail);
+                if (state == MobileHotspotState.Off || state == MobileHotspotState.Unavailable)
+                {
+                    messages.Add(stateDetail);
+                    detail = string.Join("\n", messages.ToArray());
+                    return true;
+                }
+                if (state == MobileHotspotState.Error && !stop.Success)
+                    break;
+                Thread.Sleep(300);
+            }
+
+            messages.Add("最终状态: " + stateDetail);
+            detail = string.Join("\n", messages.ToArray());
+            return state != MobileHotspotState.On && state != MobileHotspotState.InTransition;
+        }
+
+        private static HostedNetworkState GetHostedNetworkState(out string output)
+        {
+            var r = RunCommand("netsh", "wlan show hostednetwork");
+            output = r.Message;
+            if (!r.Success) return HostedNetworkState.Unknown;
+
+            if (Regex.IsMatch(output, @"Status\s*:\s*Started", RegexOptions.IgnoreCase) ||
+                Regex.IsMatch(output, @"状态\s*[:：]\s*已启动"))
+                return HostedNetworkState.Started;
+
+            if (Regex.IsMatch(output, @"Status\s*:\s*Not\s*Started", RegexOptions.IgnoreCase) ||
+                Regex.IsMatch(output, @"状态\s*[:：]\s*未启动"))
+                return HostedNetworkState.Stopped;
+
+            return HostedNetworkState.Unknown;
+        }
+
+        private static bool WaitHostedNetworkStopped(int timeoutMs, out string detail)
+        {
+            string output = string.Empty;
+            int deadline = Environment.TickCount + timeoutMs;
+            while (true)
+            {
+                HostedNetworkState state = GetHostedNetworkState(out output);
+                if (state == HostedNetworkState.Stopped)
+                {
+                    detail = "承载网络已停止";
+                    return true;
+                }
+                if (state == HostedNetworkState.Started)
+                    RunCommand("netsh", "wlan stop hostednetwork");
+
+                if (Environment.TickCount - deadline >= 0 || timeoutMs <= 0)
+                {
+                    detail = "等待承载网络停止超时\n" + output;
+                    return false;
+                }
+                Thread.Sleep(300);
+            }
+        }
+
+        private HotspotResult ResetHostedNetworkState(string ssid, string password)
+        {
+            var messages = new List<string>();
+
+            var disallow = RunCommand("netsh", "wlan set hostednetwork mode=disallow");
+            messages.Add("承载网络 mode=disallow: " + disallow.Message);
+            RunCommand("netsh", "wlan stop hostednetwork");
+
+            string waitDetail;
+            if (!WaitHostedNetworkStopped(6000, out waitDetail))
+                messages.Add(waitDetail);
+
+            var cfg = Configure(ssid, password);
+            messages.Add("承载网络重新配置: " + cfg.Message);
+            if (!cfg.Success)
+                return new HotspotResult { Success = false, Message = string.Join("\n", messages.ToArray()) };
+
+            Thread.Sleep(300);
+            return new HotspotResult { Success = true, Message = string.Join("\n", messages.ToArray()) };
+        }
+
         private HotspotResult PrepareHostedNetwork(IcsManager.NetworkAdapterInfo wirelessAdapter = null)
         {
             var query = RunCommand("sc", "query WlanSvc");
@@ -458,11 +657,13 @@ namespace WifiHotspot
                     !string.Equals(nic.Id, wirelessAdapter.Id, StringComparison.OrdinalIgnoreCase) &&
                     !string.Equals(nic.Name, wirelessAdapter.Name, StringComparison.OrdinalIgnoreCase))
                     continue;
-                if (nic.OperationalStatus != OperationalStatus.Down && nic.OperationalStatus != OperationalStatus.NotPresent) continue;
+                if (IsInterfaceAdminEnabled(nic.Name, nic.OperationalStatus)) continue;
                 RunCommand("netsh", string.Format("interface set interface \"{0}\" admin=ENABLED", EscapeArgument(nic.Name)));
             }
 
             RunCommand("netsh", "wlan stop hostednetwork");
+            string waitDetail;
+            WaitHostedNetworkStopped(2000, out waitDetail);
             return new HotspotResult { Success = true, Message = "无线环境已准备" };
         }
 
@@ -573,6 +774,10 @@ namespace WifiHotspot
 
         private HotspotResult StartLegacy(IcsManager.NetworkAdapterInfo internetAdapter, string ssid, string password, IcsManager.NetworkAdapterInfo wirelessAdapter = null, bool strictIcs = false)
         {
+            string releaseDetail;
+            if (!ReleaseSystemMobileHotspot(out releaseDetail))
+                return new HotspotResult { Success = false, Message = "无法关闭系统移动热点，传统承载网络不能与它同时占用无线网卡。\n" + releaseDetail };
+
             var prepare = PrepareHostedNetwork(wirelessAdapter);
             if (!prepare.Success)
                 return prepare;
@@ -584,11 +789,9 @@ namespace WifiHotspot
             var startResult = RunCommand("netsh", "wlan start hostednetwork");
             if (!startResult.Success && IsHostedNetworkStateError(startResult.Message))
             {
-                RunCommand("netsh", "wlan stop hostednetwork");
-                Thread.Sleep(500);
-                cfg = Configure(ssid, password);
-                if (!cfg.Success)
-                    return cfg;
+                var reset = ResetHostedNetworkState(ssid, password);
+                if (!reset.Success)
+                    return new HotspotResult { Success = false, Message = "承载网络状态冲突，软件已自动关闭系统移动热点并完整重置，但仍无法启动。\n\n重置信息:\n" + reset.Message + "\n\n原始信息:\n" + startResult.Message };
                 startResult = RunCommand("netsh", "wlan start hostednetwork");
             }
 
@@ -596,7 +799,7 @@ namespace WifiHotspot
             {
                 string m = startResult.Message;
                 if (IsHostedNetworkStateError(m))
-                    return new HotspotResult { Success = false, Message = "无法启动热点。软件已自动尝试启动 WLAN 服务、启用无线网卡并重置承载网络，诊断结果将在窗口中显示。\n\n原始信息:\n" + m };
+                    return new HotspotResult { Success = false, Message = "无法启动热点。软件已自动尝试启动 WLAN 服务、关闭系统移动热点、启用无线网卡并重置承载网络，诊断结果将在窗口中显示。\n\n原始信息:\n" + m };
                 return startResult;
             }
 
