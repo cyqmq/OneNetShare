@@ -34,7 +34,7 @@ func TestHTTPStreamRewrite(t *testing.T) {
 	if strings.Contains(text, "OneNetShare-Unprobed") {
 		t.Fatalf("UA 未被改写: %s", text)
 	}
-	if !strings.Contains(text, "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)") {
+	if !strings.Contains(text, "User-Agent:Mozilla/5.0") {
 		t.Fatalf("UA 未替换为画像值: %s", text)
 	}
 	if strings.Contains(text, "Via:") || strings.Contains(text, "X-Forwarded-For:") {

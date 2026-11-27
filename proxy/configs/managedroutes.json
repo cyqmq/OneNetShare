@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "enabled": false,
+  "policy": {
+    "allow_default_route": false
+  },
+  "interfaces": {},
+  "routes": []
+}

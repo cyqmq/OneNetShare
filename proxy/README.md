@@ -4,7 +4,7 @@ Go 单文件二进制，双端部署：OpenWrt 网关透明劫持（REDIRECT 模
 
 ## 核心能力
 
-- **HTTP（80）明文改写**：识别请求后按规则重写 `User-Agent` / `Accept-*` / `Referer` / `Origin` / `sec-ch-ua*` / `Sec-Fetch-*` 等
+- **HTTP（80）明文改写**：识别请求后按规则重写 `User-Agent` / `Accept-*` / `Referer` / `Origin` / `sec-ch-ua*` / `Sec-Fetch-*` 等；TUN 模式按原始 Header 长度等长写回，避免包长变化。等长模式只改写已有 Header；新增画像头仅在删除头留下的空间足够时写入，不足时优先保持包长不变
 - **HTTPS（443）盲转发**：不解密，由网关协议栈重新发起 TCP 连接，WAN 口看到的 TCP 指纹（ISN/窗口/MSS/时间戳）统一
 - **画像系统**：8 个内置预设（Chrome/Edge/Firefox/Safari × Win11/Win10/Android/iOS/macOS）+ 完全自定义
 - **规则引擎**：按域名（精确/通配/后缀）+ 路径前缀匹配，支持开关、设置/删除/添加 Header
@@ -13,6 +13,7 @@ Go 单文件二进制，双端部署：OpenWrt 网关透明劫持（REDIRECT 模
 - **DeviceForge**：总开关式终端特征收敛，统一 Header / UDP / DNS / NTP / mDNS / DHCP 指纹
 - **核心监控（只读）**：`monitor` 开关记录原始/改写后的 HTTP User-Agent；HTTPS 不解密，仅在 CONNECT/透明转发入口被动解析首个 ClientHello 的 SNI 与 JA3；90 秒内手机 UA 与电脑流量混杂且随后断开时写入 `[probe][监控证据]`
 - **内嵌 DNS 服务+缓存**：`deviceforge.dns.embedded=true` 时手机 UDP:53 查询先查本地缓存，未命中经出口网卡配置的 DNS 上游查询；支持 TTL 递减、负缓存、EDNS 清理与 TCP 上游
+- **Windows 管理路由账本**：读取配置目录旁的 `managedroutes.json`，启动前全量预检冲突，只添加并清理自己写入的精确 IPv4 路由，不删除 VPN/代理或其他接口的路由，不修改全局网卡跃点
 - **Windows 有线入口拓扑**：GUI 可选 `有线入口 → 无线热点`，强制用有线以太网卡作为 ICS 公共端、指定无线网卡作为热点端；该模式跳过全局网络层归一化，IPv6/Portal 封禁只作用于热点接口 `ifIdx`
 - **Captive 探测处置**：由路由器代答或 Drop，避免 Apple/Windows/Android/Firefox 探测外泄
 
@@ -86,6 +87,7 @@ proxy/
 │   ├── tun/                        # TUN + TCP/UDP 状态机
 │   └── version/
 ├── configs/config.json             # 规则配置示例
+├── configs/managedroutes.json      # Windows 管理路由策略示例（默认禁用）
 ├── scripts/
 │   ├── setup-openwrt.sh
 │   └── run-windows.bat
@@ -191,9 +193,44 @@ GOOS=windows GOARCH=386 CGO_ENABLED=0 go build -o build/hotspot-proxy-win-x86.ex
 
 Windows 下 `tun.enabled=true` 使用 Wintun 全局接管：需把官方 x86 `wintun.dll` 放在 `hotspot-proxy.exe` 同目录并以管理员运行。GUI 会列出真实物理网卡供用户选择出口网卡；`upstream_interface` 留空时自动读取 IPv4 默认路由对应的物理网卡，代理上游 TCP/UDP 会绑定到该网卡，避免流量重新进入 TUN。退出时通过 `GET /shutdown` 或直接信号恢复路由。`tun.ttl` 与 GUI 的“强制 TTL”共用：Windows 画像推荐 128，Android/macOS/iOS/Linux 画像推荐 64，GUI 切换画像时会自动填入并显示防呆提示。`network.mtu_clamp_enabled=true` 时，WinDivert SYN MSS 与 Wintun 合成 SYN-ACK MSS 都会被钳制到 `mss_clamp`；遇到 TLS 握手卡住时可将 1460 降到 1360/1280。`deviceforge.dns.upstream_servers` 可填写最多 3 个 IPv4 DNS（逗号/分号/空格分隔，GUI 上游 DNS 输入框同样支持），Wintun 接管默认路由时会在虚拟网卡设置主/备 DNS，DNS 查询仍经代理统一归一化；退出时恢复 DHCP DNS。经 GUI 启动的代理会把 `[probe]` 事件写入程序目录 `probe.log`，供代理功能窗口滚动显示 Captive/DNS/未知 UDP 事件。
 
-Windows 网络层归一化使用 WinDivert 2.x：Windows 发行包已附带官方 2.2.2 A 版 x86 `WinDivert.dll`、32 位驱动 `WinDivert32.sys` 与 64 位驱动 `WinDivert64.sys`，三者需与 `WifiHotspot.exe` 放在同一目录，并以管理员权限运行。WinDivert 2.x 驱动文件名不是 `WinDivert.sys`；32 位程序在 64 位 Windows 上需要同时保留两个 `.sys` 文件。
+Windows 网络层归一化使用 WinDivert 2.x：Windows 发行包已附带官方 2.2.2 A 版 x86 `WinDivert.dll`、32 位驱动 `WinDivert32.sys` 与 64 位驱动 `WinDivert64.sys`，三者需与 `WifiHotspot.exe` 放在同一目录，并以管理员权限运行。WinDivert 2.x 驱动文件名不是 `WinDivert.sys`；32 位程序在 64 位 Windows 上需要同时保留两个 `.sys` 文件。启用 TCP 归一化时，SYN 选项统一 MSS/窗口缩放/SACK Permitted/Timestamp，并对所有出站 TCP Timestamp 覆盖 TSval、保留 TSecr，避免同一热点出现多个时钟斜率；这只收敛指纹，不等于加密或防 DPI。
 
-内置画像名：`chrome-win11`, `chrome-win10`, `edge-win11`, `chrome-android`, `safari-ios`, `safari-macos`, `firefox-win11`, `curl-linux`；兼容别名：`mobile-android`（等同 `chrome-android`）、`mobile-ios`（等同 `safari-ios`）。
+### Windows 管理路由 `managedroutes.json`
+
+默认读取配置文件同目录的 `managedroutes.json`，也可用 `--managed-routes <path>` 显式指定。文件不存在或 `enabled=false` 时不添加路由；状态账本写在同目录的 `managedroutes.state.json`，只记录本次实际写入的精确路由，退出、SIGHUP、`/reload` 和配置文件 2 秒轮询都会清理/差分重载。
+
+```json
+{
+  "version": 1,
+  "enabled": true,
+  "policy": { "allow_default_route": false },
+  "interfaces": {
+    "campus": {
+      "name": "Ethernet",
+      "adapter_guid": "{xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx}",
+      "index": 12,
+      "subnet": "10.0.0.0/24"
+    }
+  },
+  "routes": [
+    {
+      "id": "auth-server",
+      "enabled": true,
+      "source": { "interface": "campus", "subnet": "10.0.0.0/24" },
+      "destination": "10.43.255.1/32",
+      "via": "campus",
+      "gateway": "10.0.0.1",
+      "metric": 1,
+      "layer": "auth"
+    }
+  ]
+}
+```
+
+`gateway` 也可写 `next_hop`。Windows 路由表没有真正的“源地址 → 目标”四元组，`source` 与 `adapter_guid`、`index`、`subnet` 只用于配置约束、归属核对和诊断，不会变成 Windows 源策略路由。启动前会对所有目标前缀做全量预检：只要同前缀存在非本账本路由（包括 VPN、其他网卡、代理软件写入），就拒绝启动且不修改任何路由。只用 `netsh interface ipv4 add/delete route ... store=active` 操作精确 IPv4 路由，不做持久化写入，也不改全局网卡跃点。`0.0.0.0/0` 默认拒绝；确实要由 TUN 接管全部出口时，必须在该路由上或 `policy` 中显式设置 `allow_default_route=true`。`tun.route=true` 仍负责 Wintun 自己的默认路由，二者冲突时以后启动者失败为准。
+
+内置画像名：
+`chrome-win11`, `chrome-win10`, `edge-win11`, `chrome-android`, `safari-ios`, `safari-macos`, `firefox-win11`, `curl-linux`；兼容别名：`mobile-android`（等同 `chrome-android`）、`mobile-ios`（等同 `safari-ios`）。
 
 用 `hotspot-proxy --dump-config` 输出完整模板。
 
@@ -224,7 +261,7 @@ iptables -t nat -L HOTSPOT_PROXY -n -v
 iptables -t filter -L HOTSPOT_PORTAL -n -v
 ```
 
-`/status` 会输出 `version`、`revision`、`pid`、`exe`、`generation`、当前 `ua_preset` 以及 `monitor=总开关/TTL/UA/TLS`（GUI 配置另有 `monitor.dns`）、`ua_phone`、`ua_desktop`、`tls`、`alerts`，以及 `dns_embedded`、`dns_cache`、`dns_queries`、`dns_hits`、`dns_misses`、`dns_upstream_ok`、`dns_upstream_err`；GUI 用 `generation` 判断 18080 上的进程是否仍是当前配置，不匹配会自动重启该进程。
+`/status` 会输出 `version`、`revision`、`pid`、`exe`、`generation`、当前 `ua_preset` 以及 `monitor=总开关/TTL/UA/TLS`（GUI 配置另有 `monitor.dns`）、`ua_phone`、`ua_desktop`、`tls`、`alerts`，以及 `dns_embedded`、`dns_cache`、`dns_queries`、`dns_hits`、`dns_misses`、`dns_upstream_ok`、`dns_upstream_err`、`managed_routes`；GUI 用 `generation` 判断 18080 上的进程是否仍是当前配置，不匹配会自动重启该进程。
 
 ### Windows 原型
 

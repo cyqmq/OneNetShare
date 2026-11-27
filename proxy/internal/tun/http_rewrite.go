@@ -62,7 +62,7 @@ func (r *httpStreamRewriter) rewriteHeader(header []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	_, rewritten, err := r.engine.RewriteWithClient(req, "", r.clientIP)
+	_, rewritten, err := r.engine.RewriteWithClientExact(req, "", r.clientIP)
 	if err != nil {
 		return nil, err
 	}

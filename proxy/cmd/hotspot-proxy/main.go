@@ -18,6 +18,7 @@ import (
 	"hotspot-proxy/internal/headers"
 	"hotspot-proxy/internal/monitor"
 	"hotspot-proxy/internal/proxy"
+	"hotspot-proxy/internal/routes"
 	"hotspot-proxy/internal/tun"
 	"hotspot-proxy/internal/version"
 )
@@ -25,6 +26,7 @@ import (
 func main() {
 	showVersion := flag.Bool("version", false, "显示版本")
 	configPath := flag.String("config", "", "配置文件路径")
+	managedRoutesPath := flag.String("managed-routes", "", "管理路由配置文件路径")
 	dumpConfig := flag.Bool("dump-config", false, "输出默认配置模板到 stdout")
 	flag.Parse()
 
@@ -54,6 +56,16 @@ func main() {
 	}
 	if logger == nil {
 		logger = log.New(os.Stderr, "", log.LstdFlags)
+	}
+
+	routesPath := *managedRoutesPath
+	if routesPath == "" {
+		routesPath = routes.DefaultPath(path)
+	}
+	routeManager := routes.New(routesPath, logger)
+	reloadManagedRoutes := func() error {
+		_, err := routeManager.ReloadIfChanged()
+		return err
 	}
 
 	var forge *deviceforge.Manager
@@ -95,6 +107,11 @@ func main() {
 			tunDev.Close()
 			logger.Fatalf("TUN 路由配置失败: %v", err)
 		}
+		if err := routeManager.Start(); err != nil {
+			cleanup()
+			tunDev.Close()
+			logger.Fatalf("管理路由配置失败: %v", err)
+		}
 		tunDev.StartCleanup()
 		if cfg.DeviceForge.Enabled {
 			tunDev.SetUDPHandler(func(srcIP net.IP, srcPort uint16, dstIP net.IP, dstPort uint16, payload []byte) {
@@ -113,7 +130,7 @@ func main() {
 		stopCh := make(chan struct{})
 		var stopOnce sync.Once
 		stop := func() { stopOnce.Do(func() { close(stopCh) }) }
-		go startStatusServer(loader, logger, stop, tracker, forge)
+		go startStatusServer(loader, logger, stop, tracker, forge, routeManager)
 		go func() {
 			if err := tunDev.Run(); err != nil {
 				logger.Printf("TUN 运行错误: %v", err)
@@ -128,6 +145,9 @@ func main() {
 			select {
 			case <-stopCh:
 				proxyServer.Close()
+				if err := routeManager.Cleanup(); err != nil {
+					logger.Printf("管理路由清理失败: %v", err)
+				}
 				cleanup()
 				tunDev.Close()
 				logger.Printf("全局 TUN 模式已退出，路由已恢复")
@@ -136,6 +156,9 @@ func main() {
 				if sig == syscall.SIGHUP {
 					if err := loader.Reload(); err != nil {
 						logger.Printf("reload 失败: %v", err)
+					}
+					if err := reloadManagedRoutes(); err != nil {
+						logger.Printf("managed routes reload 失败: %v", err)
 					}
 					continue
 				}
@@ -162,18 +185,20 @@ func main() {
 			logger.Fatal(err)
 		}
 	}
+	if err := routeManager.Start(); err != nil {
+		logger.Fatalf("管理路由配置失败: %v", err)
+	}
 	go func() {
 		if err := srv.Run(cfg.ListenHTTP); err != nil {
 			logger.Fatal(err)
 		}
 	}()
 
-	go startReloadWatcher(loader, logger)
-
 	stopCh := make(chan struct{})
 	var stopOnce sync.Once
 	stop := func() { stopOnce.Do(func() { close(stopCh) }) }
-	go startStatusServer(loader, logger, stop, tracker, forge)
+	go startReloadWatcher(loader, logger, routeManager, stopCh)
+	go startStatusServer(loader, logger, stop, tracker, forge, routeManager)
 
 	logger.Printf("%s 启动完成 (http=%s https=%s mode=%s)",
 		version.String(), cfg.ListenHTTP, cfg.ListenHTTPS, cfg.Mode)
@@ -184,11 +209,17 @@ func main() {
 		select {
 		case <-stopCh:
 			srv.Close()
+			if err := routeManager.Cleanup(); err != nil {
+				logger.Printf("管理路由清理失败: %v", err)
+			}
 			return
 		case sig := <-sigCh:
 			if sig == syscall.SIGHUP {
 				if err := loader.Reload(); err != nil {
 					logger.Printf("reload 失败: %v", err)
+				}
+				if err := reloadManagedRoutes(); err != nil {
+					logger.Printf("managed routes reload 失败: %v", err)
 				}
 				continue
 			}
@@ -198,21 +229,29 @@ func main() {
 	}
 }
 
-func startReloadWatcher(loader *config.Loader, logger *log.Logger) {
+func startReloadWatcher(loader *config.Loader, logger *log.Logger, routeManager *routes.Manager, stopCh <-chan struct{}) {
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
-	for range ticker.C {
-		changed, err := loader.ReloadIfChanged()
-		if err != nil {
-			continue
-		}
-		if changed {
-			logger.Println("检测到配置文件变更，已热重载")
+	for {
+		select {
+		case <-stopCh:
+			return
+		case <-ticker.C:
+			changed, err := loader.ReloadIfChanged()
+			if err != nil {
+				continue
+			}
+			if changed {
+				logger.Println("检测到配置文件变更，已热重载")
+			}
+			if _, err := routeManager.ReloadIfChanged(); err != nil {
+				logger.Printf("managed routes 热重载失败: %v", err)
+			}
 		}
 	}
 }
 
-func startStatusServer(loader *config.Loader, logger *log.Logger, stop func(), tracker *monitor.Tracker, forge *deviceforge.Manager) {
+func startStatusServer(loader *config.Loader, logger *log.Logger, stop func(), tracker *monitor.Tracker, forge *deviceforge.Manager, routeManager *routes.Manager) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/status", func(w http.ResponseWriter, r *http.Request) {
 		cfg := loader.Get()
@@ -234,9 +273,14 @@ func startStatusServer(loader *config.Loader, logger *log.Logger, stop func(), t
 		fmt.Fprintf(w, "dns_embedded=%v dns_cache=%d dns_queries=%d dns_hits=%d dns_misses=%d dns_upstream_ok=%d dns_upstream_err=%d\n",
 			cfg.DeviceForge.DNS.IsEmbedded(), cfg.DeviceForge.DNS.CacheSize,
 			dnsStats.Queries, dnsStats.Hits, dnsStats.Misses, dnsStats.UpstreamOK, dnsStats.UpstreamErr)
+		fmt.Fprintln(w, routeManager.Status())
 	})
 	mux.HandleFunc("/reload", func(w http.ResponseWriter, r *http.Request) {
 		if err := loader.Reload(); err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		if _, err := routeManager.ReloadIfChanged(); err != nil {
 			http.Error(w, err.Error(), 500)
 			return
 		}

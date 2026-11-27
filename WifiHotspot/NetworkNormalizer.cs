@@ -19,6 +19,9 @@ namespace WifiHotspot
         private volatile bool _running;
         private string _lastMessage = "未运行";
         private int _ipIdCounter = 0x4000;
+        private readonly object _timestampLock = new object();
+        private int _lastTimestampTick = Environment.TickCount;
+        private uint _tcpTimestampCounter = (uint)Environment.TickCount;
         private static readonly NetworkNormalizer SharedInstance = new NetworkNormalizer();
 
         public static NetworkNormalizer Shared
@@ -248,13 +251,17 @@ namespace WifiHotspot
             if (protocol != 6) return changed;
             int mssClamp = settings.MtuClampEnabled && settings.MssClamp > 0 ? settings.MssClamp : 1460;
             if (settings.NetworkTCPOptions)
-                return RewriteTcpOptions(packet, ref length, ipLength, ipv4, mssClamp) || changed;
+            {
+                bool optionsChanged = RewriteTcpOptions(packet, ref length, ipLength, ipv4, mssClamp);
+                bool timestampChanged = NormalizeTcpTimestamps(packet, ipLength, length);
+                return optionsChanged || timestampChanged || changed;
+            }
             if (settings.MtuClampEnabled)
                 return ClampTcpMss(packet, ipLength, length, mssClamp) || changed;
             return changed;
         }
 
-        private static bool RewriteTcpOptions(byte[] packet, ref int length, int ipLength, bool ipv4, int mssClamp)
+        private bool RewriteTcpOptions(byte[] packet, ref int length, int ipLength, bool ipv4, int mssClamp)
         {
             int tcp = ipLength;
             if (length < tcp + 20) return false;
@@ -278,7 +285,7 @@ namespace WifiHotspot
             }
 
             WriteU16(packet, tcp + 14, 65535);
-            byte[] options = BuildTcpOptions(mssClamp);
+            byte[] options = BuildTcpOptions(mssClamp, NextTcpTimestamp());
             if (optionLength == options.Length)
             {
                 bool same = true;
@@ -306,6 +313,50 @@ namespace WifiHotspot
             else
                 WriteU16(packet, 4, (ushort)(length - 40));
             return true;
+        }
+
+        private uint NextTcpTimestamp()
+        {
+            lock (_timestampLock)
+            {
+                int now = Environment.TickCount;
+                uint candidate = now > _lastTimestampTick ? (uint)now : _tcpTimestampCounter + 1;
+                if (candidate <= _tcpTimestampCounter) candidate = _tcpTimestampCounter + 1;
+                _lastTimestampTick = now;
+                _tcpTimestampCounter = candidate;
+                return _tcpTimestampCounter;
+            }
+        }
+
+        private bool NormalizeTcpTimestamps(byte[] packet, int tcp, int length)
+        {
+            if (length < tcp + 20) return false;
+            int dataOffset = (packet[tcp + 12] >> 4) * 4;
+            if (dataOffset < 20 || tcp + dataOffset > length) return false;
+
+            uint timestamp = NextTcpTimestamp();
+            bool changed = false;
+            int cursor = tcp + 20;
+            int end = tcp + dataOffset;
+            while (cursor < end)
+            {
+                int kind = packet[cursor];
+                if (kind == 0) break;
+                if (kind == 1) { cursor++; continue; }
+                if (cursor + 1 >= end) break;
+                int optionSize = packet[cursor + 1];
+                if (optionSize < 2 || cursor + optionSize > end) break;
+                if (kind == 8 && optionSize == 10)
+                {
+                    if (ReadU32(packet, cursor + 2) != timestamp)
+                    {
+                        WriteU32(packet, cursor + 2, timestamp);
+                        changed = true;
+                    }
+                }
+                cursor += optionSize;
+            }
+            return changed;
         }
 
         private static bool ClampTcpMss(byte[] packet, int tcp, int length, int mssClamp)
@@ -337,7 +388,7 @@ namespace WifiHotspot
             return false;
         }
 
-        private static byte[] BuildTcpOptions(int mssClamp)
+        private static byte[] BuildTcpOptions(int mssClamp, uint timestamp)
         {
             int mss = mssClamp > 0 && mssClamp <= 65535 ? mssClamp : 1460;
             return new byte[]
@@ -346,8 +397,27 @@ namespace WifiHotspot
                 3, 3, 8,
                 4, 2,
                 1, 1,
-                0
+                8, 10,
+                (byte)(timestamp >> 24), (byte)(timestamp >> 16), (byte)(timestamp >> 8), (byte)timestamp,
+                0, 0, 0, 0,
+                1, 1, 1
             };
+        }
+
+        private static uint ReadU32(byte[] data, int offset)
+        {
+            return ((uint)data[offset] << 24) |
+                   ((uint)data[offset + 1] << 16) |
+                   ((uint)data[offset + 2] << 8) |
+                   data[offset + 3];
+        }
+
+        private static void WriteU32(byte[] data, int offset, uint value)
+        {
+            data[offset] = (byte)(value >> 24);
+            data[offset + 1] = (byte)(value >> 16);
+            data[offset + 2] = (byte)(value >> 8);
+            data[offset + 3] = (byte)value;
         }
 
         private static ushort ReadU16(byte[] data, int offset)

@@ -1,6 +1,7 @@
 package headers
 
 import (
+	"bufio"
 	"os"
 	"path/filepath"
 	"strings"
@@ -139,5 +140,38 @@ func TestRewriteStripsRefererOnCaptiveProbe(t *testing.T) {
 	}
 	if strings.Contains(strings.ToLower(rewritten), "\r\nreferer:") || strings.Contains(strings.ToLower(rewritten), "\r\norigin:") {
 		t.Fatalf("captive probe Referer/Origin 未清除: %s", rewritten)
+	}
+}
+
+func TestRewriteWithClientExactPreservesHeaderLength(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	data := `{"enabled":true,"mode":"tun","default_profile":"chrome-win11","rules":[],"deviceforge":{"enabled":true,"headers":true},"profiles":{}}`
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loader, err := config.NewLoader(path, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine := NewEngine(loader)
+	oldUA := strings.Repeat("A", 180)
+	raw := "GET / HTTP/1.1\r\nHost: example.com\r\nUser-Agent: " + oldUA + "\r\nAccept: */*\r\n\r\n"
+	req, err := ParseRequest(bufio.NewReader(strings.NewReader(raw)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, rewritten, err := engine.RewriteWithClientExact(req, "", "192.168.137.2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := ParseRequest(bufio.NewReader(strings.NewReader(rewritten)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(parsed.RawHeader) != len(req.RawHeader) {
+		t.Fatalf("Header 长度变化: old=%d new=%d\n%s", len(req.RawHeader), len(parsed.RawHeader), rewritten)
+	}
+	if strings.Contains(rewritten, oldUA) {
+		t.Fatalf("UA 未被改写: %s", rewritten)
 	}
 }

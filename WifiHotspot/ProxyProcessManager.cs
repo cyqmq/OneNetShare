@@ -126,7 +126,16 @@ namespace WifiHotspot
                 request.ReadWriteTimeout = 1500;
                 using (HttpWebResponse response = (HttpWebResponse)request.GetResponse()) { }
                 graceful = true;
-                Thread.Sleep(800);
+                Process active = _activeProcess;
+                if (active != null)
+                {
+                    try { active.WaitForExit(10000); }
+                    catch { }
+                }
+                else
+                {
+                    for (int i = 0; i < 50 && IsRunning(); i++) Thread.Sleep(100);
+                }
             }
             catch { }
 
@@ -149,7 +158,7 @@ namespace WifiHotspot
             DisposeActiveProcess();
             if (count == 0)
                 return graceful ? "代理已停止，路由已恢复" : "代理未运行";
-            return graceful ? "代理已停止，已清理残留进程 (" + count + ")" : "代理已强制停止 (" + count + ")";
+            return "代理已强制停止 (" + count + ")";
         }
 
         public static string GetProcessOutput()

@@ -33,11 +33,12 @@
 - MTU/MSS 钳制自动降级：WinDivert SYN MSS 与 Wintun 合成 SYN-ACK MSS 均可钳制到 1460/1360/1280，便于排查网站卡在 TLS 握手的问题
 - 探针日志面板实时滚动显示 Captive 拦截、DNS 规范化、未知 UDP 丢弃事件；一键连通性测试通过本地回显探针验证 HTTP Header 改写，并检查 TUN 默认路由与 IPv6 裸露风险
 - 代理自动诊断：启动失败时自动检查 `config.json`、端口格式/占用/Windows 保留端口范围、退出码、进程输出与 `probe.log`，给出端口/权限/文件/TUN 出口网卡等具体原因；代理功能窗口提供“自动诊断”按钮；一键测试会比对配置生成号与代理 `/status`，发现旧进程时自动重启并显示版本/路径；`probe.log` 被代理占用时日志面板与诊断改为共享读
-- 网络层指纹归一化：基于 WinDivert 在 Windows 网卡出口强制重写 IPv4 TTL/IPID、IPv6 Hop Limit 与 traffic class/Flow Label 清零、TCP SYN 选项；Flow Label 清零只用于指纹收敛，不代表 IPv6 隐私安全；已随包附带官方 WinDivert 2.2.2 x86 `WinDivert.dll`、`WinDivert32.sys`、`WinDivert64.sys`，需管理员权限
+- 网络层指纹归一化：基于 WinDivert 在 Windows 网卡出口强制重写 IPv4 TTL/IPID、IPv6 Hop Limit 与 traffic class/Flow Label 清零、TCP SYN 选项，并统一所有出站 TCP 的 timestamp（TSval），保留 TSecr；Flow Label 清零只用于指纹收敛，不代表 IPv6 隐私安全；已随包附带官方 WinDivert 2.2.2 x86 `WinDivert.dll`、`WinDivert32.sys`、`WinDivert64.sys`，需管理员权限
 - 核心监控容错：`ip or ipv6` 过滤器打开失败（如错误码 3/87）时自动降级为 DNS-only UDP:53 只读监控；错误码 3 会进一步读取 `sc qc WinDivert` 的驱动路径，发现旧路径/失效服务时自动 `sc stop WinDivert`、`sc delete WinDivert` 并重试，仍失败时输出具体路径与恢复步骤，自动诊断同步识别。
 - 核心监控（只读）：WinDivert `SNIFF` 模式旁路记录手机→电脑与 NAT 后电脑→网关的同流 TTL/Hop Limit，出现 `64 → 63` 时在 `probe.log` 写入 `[TTL证据]`；代理侧记录原始/改写后 HTTP User-Agent，并被动解析 HTTPS ClientHello 的 SNI 与 JA3（不 MITM、不改包）；WinDivert 只读 sniff UDP:53，区分“手机未发出查询/电脑未收到”“电脑已收到但代理未转发”“已返回手机”；DNS 与 TTL 共用单个 WinDivert 只读句柄，避免多句柄触发错误 1450。全局 TUN 接管时 TTL 由 TUN 自身归一化，跳过 WinDivert TTL 监控，但 UDP:53 监控仍运行。若 90 秒内出现多次手机 UA 与电脑流量混杂且随后断开，会写入 `[监控证据]` 供自动诊断定位认证网关应用层指纹匹配
 - 内嵌 DNS 服务：在全局 TUN / Linux redirect 的 UDP:53 拦截路径生效；手机 DNS 查询先查本地缓存（支持 TTL 递减、负缓存与容量上限），未命中时通过电脑物理网卡配置的 DNS 上游查询，按现有规则归一化 TTL/EDNS 后返回手机；GUI 可一键从出口网卡读取 IPv4 DNS，`force_tcp` 改为代理到上游使用 TCP 而不是让手机重试。ICS 原生模式下 53 由 Windows ICS 占用，需开启全局 TUN 才能让内嵌 DNS 接手
 - Wintun 全局 TUN 接管：创建 `OneNetShare Tunnel` 虚拟网卡，只接管 IPv4 默认路由/DNS，在用户态重建 UDP/DNS/NTP 会话并统一出口包指纹，TCP 80 流同样应用 HTTP Header 画像；需要官方 x86 `wintun.dll` 和管理员权限
+- 管理路由账本：代理读取配置目录旁的 `managedroutes.json`，启动前全量预检冲突，发现 VPN/代理/其他接口占用目标路由时拒绝启动且不删除他人路由；只添加账本中的精确 IPv4 路由，退出/重载时按 `(prefix, interface, gateway, metric)` 精确清理，不修改全局网卡跃点。HTTP `User-Agent` 在 TUN 80 流中按原始 Header 长度等长改写，避免包长变化；默认路由必须显式 `allow_default_route`，否则拒绝
 - IPv6 隐私保护：可在 GUI 中一键启用/关闭 IPv6 转发封禁。启用时，若热点虚拟网卡检测到公网/全局 IPv6(GUA) 则在 WinDivert `NETWORK_FORWARD` 层丢弃转发 IPv6，防止手机绕过 IPv4 NAT/代理裸奔；仅 ULA/Link-local 时不启动封禁；可选仅允许 ULA/Link-local 或显式允许 IPv6（不安全）。关闭后不启动 WinDivert 封禁。
 - 自动配置 ICS（Internet Connection Sharing）网络共享
 - 可自定义 SSID、密码（8-63 位 WPA2）

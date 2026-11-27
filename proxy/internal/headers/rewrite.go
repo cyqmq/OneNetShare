@@ -17,13 +17,15 @@ type Header struct {
 }
 
 type Request struct {
-	Method    string
-	URI       string
-	Proto     string
-	Host      string
-	Path      string
-	Headers   []Header
-	RawHeader string
+	Method      string
+	URI         string
+	Proto       string
+	Host        string
+	Path        string
+	Headers     []Header
+	RawHeader   string
+	RawLines    []string
+	RequestLine string
 }
 
 func ParseRequest(reader *bufio.Reader) (*Request, error) {
@@ -38,9 +40,10 @@ func ParseRequest(reader *bufio.Reader) (*Request, error) {
 	}
 
 	req := &Request{
-		Method: parts[0],
-		URI:    parts[1],
-		Proto:  parts[2],
+		Method:      parts[0],
+		URI:         parts[1],
+		Proto:       parts[2],
+		RequestLine: line,
 	}
 
 	var rawLines []string
@@ -65,6 +68,7 @@ func ParseRequest(reader *bufio.Reader) (*Request, error) {
 	}
 
 	req.RawHeader = strings.Join(rawLines, "\r\n")
+	req.RawLines = rawLines
 	req.Path = req.URI
 	if req.Host == "" && strings.HasPrefix(req.URI, "http://") {
 		rest := req.URI[len("http://"):]
@@ -245,6 +249,145 @@ func (e *Engine) RewriteWithClient(req *Request, originalDst, client string) (st
 	effectiveUA, _ := headerValueFromHeaders(headers, "User-Agent")
 	recordUA(effectiveUA)
 	return req.Proto, sb.String(), nil
+}
+
+func (e *Engine) RewriteWithClientExact(req *Request, originalDst, client string) (string, string, error) {
+	proto, rewritten, err := e.RewriteWithClient(req, originalDst, client)
+	if err != nil {
+		return proto, rewritten, err
+	}
+	if len(req.RawLines) == 0 || len(req.RawLines) != len(req.Headers) {
+		return proto, rewritten, nil
+	}
+	parsed, err := ParseRequest(bufio.NewReader(strings.NewReader(rewritten)))
+	if err != nil {
+		return proto, rewritten, nil
+	}
+	desired := make(map[string][]string)
+	for _, header := range parsed.Headers {
+		key := strings.ToLower(header.Key)
+		desired[key] = append(desired[key], header.Value)
+	}
+	matched := make(map[string]int)
+	lines := make([]string, len(req.RawLines))
+	spare := make([]int, 0)
+	for i, raw := range req.RawLines {
+		key, _, ok := rawHeaderParts(raw)
+		if !ok {
+			lines[i] = raw
+			continue
+		}
+		lowerKey := strings.ToLower(key)
+		index := matched[lowerKey]
+		if index < len(desired[lowerKey]) {
+			value := desired[lowerKey][index]
+			if lowerKey == "user-agent" && len(value) > rawHeaderValueCapacity(raw) {
+				value = fitUserAgent(rawHeaderValueCapacity(raw))
+			}
+			lines[i] = setRawHeaderValue(raw, value)
+			matched[lowerKey] = index + 1
+		} else {
+			lines[i] = exactLine("X-Padding:", len(raw))
+			spare = append(spare, i)
+		}
+	}
+	seen := make(map[string]int)
+	extra := make([]Header, 0)
+	for _, header := range parsed.Headers {
+		key := strings.ToLower(header.Key)
+		if seen[key] < matched[key] {
+			seen[key]++
+			continue
+		}
+		seen[key]++
+		extra = append(extra, header)
+	}
+	for _, header := range extra {
+		best := -1
+		bestCapacity := 0
+		for _, index := range spare {
+			candidate := header.Key + ": " + header.Value
+			if len(candidate) <= len(req.RawLines[index]) && len(req.RawLines[index]) > bestCapacity {
+				best = index
+				bestCapacity = len(req.RawLines[index])
+			}
+		}
+		if best < 0 {
+			continue
+		}
+		lines[best] = exactLine(header.Key+": "+header.Value, len(req.RawLines[best]))
+		for i, index := range spare {
+			if index == best {
+				spare = append(spare[:i], spare[i+1:]...)
+				break
+			}
+		}
+	}
+	requestLine := req.RequestLine
+	if requestLine == "" {
+		requestLine = parsed.RequestLine
+	}
+	var sb strings.Builder
+	sb.WriteString(requestLine + "\r\n")
+	for _, line := range lines {
+		sb.WriteString(line + "\r\n")
+	}
+	sb.WriteString("\r\n")
+	return proto, sb.String(), nil
+}
+
+func rawHeaderParts(raw string) (string, string, bool) {
+	idx := strings.IndexByte(raw, ':')
+	if idx <= 0 {
+		return "", "", false
+	}
+	return strings.TrimSpace(raw[:idx]), raw[idx+1:], true
+}
+
+func rawHeaderValueCapacity(raw string) int {
+	idx := strings.IndexByte(raw, ':')
+	if idx <= 0 {
+		return 0
+	}
+	return len(raw) - idx - 1
+}
+
+func setRawHeaderValue(raw, value string) string {
+	idx := strings.IndexByte(raw, ':')
+	if idx <= 0 {
+		return raw
+	}
+	capacity := len(raw) - idx - 1
+	if len(value) > capacity {
+		return raw
+	}
+	return raw[:idx+1] + value + strings.Repeat(" ", capacity-len(value))
+}
+
+func fitUserAgent(capacity int) string {
+	candidates := []string{
+		"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/158.0.0.0 Safari/537.36",
+		"Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+		"Mozilla/5.0 (Windows NT 10.0)",
+		"Mozilla/5.0 (Windows)",
+		"Mozilla/5.0",
+	}
+	for _, candidate := range candidates {
+		if len(candidate) <= capacity {
+			return candidate
+		}
+	}
+	return ""
+}
+
+func exactLine(value string, capacity int) string {
+	if capacity <= 0 {
+		return ""
+	}
+	if len(value) >= capacity {
+		return value[:capacity]
+	}
+	return value + strings.Repeat(" ", capacity-len(value))
 }
 
 func matchRule(rule config.Rule, host, path string) bool {
