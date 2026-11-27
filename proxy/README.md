@@ -16,6 +16,8 @@ Go 单文件二进制，双端部署：OpenWrt 网关透明劫持（REDIRECT 模
 - **Windows 管理路由账本**：读取配置目录旁的 `managedroutes.json`，启动前全量预检冲突，只添加并清理自己写入的精确 IPv4 路由，不删除 VPN/代理或其他接口的路由，不修改全局网卡跃点
 - **Windows 有线入口拓扑**：GUI 可选 `有线入口 → 无线热点`，强制用有线以太网卡作为 ICS 公共端、指定无线网卡作为热点端；该模式跳过全局网络层归一化，IPv6/Portal 封禁只作用于热点接口 `ifIdx`
 - **Captive 探测处置**：由路由器代答或 Drop，避免 Apple/Windows/Android/Firefox 探测外泄
+- **画像一致性自检**：启动/重载时检查默认画像的 UA、Client Hints、目标 OS、TUN TTL、DHCP Vendor Class；`identity=ok|warn` 与逐条 `identity_issue` 写入 `/status`
+- **可选出站封堵**：默认关闭；TUN 模式在 IPv4 用户态按端口/广播/组播丢弃，Windows ICS 模式由 GUI 的 WinDivert 转发层执行，状态输出 `outbound_guard` 与丢弃计数
 
 ## 底层指纹统一原理（重要）
 
@@ -61,6 +63,17 @@ DNS/NTP/QUIC/游戏等 UDP 由 `net.DialUDP` 从网关新建 socket，WAN 侧 UD
 - `drop`：DNS 查询静默丢弃；HTTP 探测直接断开；HTTPS CONNECT 按 Host 匹配时直接断开。
 
 HTTPS Captive 探测无法在不解密的情况下伪造 HTTP 响应；本版本对匹配 Host 的 CONNECT 采用断开处理，避免探测到达 WAN。
+
+### 画像一致性自检与出站封堵
+
+`config.CheckIdentity` 在代理启动和配置重载时运行，检查默认画像是否同时满足：UA 可解析、`sec-ch-ua-platform` / `sec-ch-ua-mobile` / 版本与 UA 同源、`deviceforge.target_os` 与 UA 平台同族、开启 TUN 时 TTL 与平台匹配（Windows 128，其他 64）、开启 DHCP 伪造时 Vendor Class 与平台匹配。`/status` 示例：
+
+```text
+identity=ok ua_browser=chrome ua_platform=Windows ua_target=windows-11 tun_ttl=128 identity_issues=0
+outbound_guard=enabled=false udp=[443,137,138,5355,3702,853] tcp=[139,445,853] broadcast=true multicast=true dropped=0 ...
+```
+
+`outbound_guard.enabled=true` 时，如果规则全为空会自动填入 QUIC/DoT/LLMNR/WS-D/NetBIOS 端口与广播/组播规则。TUN 模式下 Go 代理在 IPv4 包进入状态机前丢弃匹配包并计数；Windows ICS 模式下由 GUI 的 `OutboundGuard` 在 WinDivert `NETWORK_FORWARD` 层丢弃并统计。两种模式都先观测计数，再决定是否长期启用；不要默认套用外部项目的固定阈值。
 
 ## 三种接管方式
 
@@ -122,6 +135,13 @@ GOOS=windows GOARCH=386 CGO_ENABLED=0 go build -o build/hotspot-proxy-win-x86.ex
     "ttl": true,               // Windows 侧 WinDivert 只读 TTL 对比
     "ua": true,                // 记录原始/改写后 HTTP User-Agent
     "tls": true                // 被动记录 ClientHello SNI/JA3
+  },
+  "outbound_guard": {
+    "enabled": false,          // 默认关闭；启用后按端口/广播/组播丢弃并计数
+    "udp_ports": [443, 137, 138, 5355, 3702, 853],
+    "tcp_ports": [139, 445, 853],
+    "block_broadcast": true,
+    "block_multicast": true
   },
   "network": {
     "enabled": false,
@@ -185,7 +205,7 @@ GOOS=windows GOARCH=386 CGO_ENABLED=0 go build -o build/hotspot-proxy-win-x86.ex
 }
 ```
 
-内置画像按“单一画像源”生成：UA、`sec-ch-ua`、`sec-ch-ua-full-version-list`、`sec-ch-ua-mobile` 与平台版本都来自同一浏览器版本/平台；Firefox 与 Safari 不携带 Chromium Client Hints。`ua_preset` 从内置 UA 库选择预设并自动套用完整 Header，不需要手输 UA；`user_agent_override` 仅保留给旧配置兼容。规则的 `profile: "default"` 会跟随 `default_profile`。`ipv6_guard_enabled` 是 Windows GUI 侧的 IPv6 转发封禁总开关，`ipv6_policy` 是封禁策略键：开关启用且检测到公网 IPv6 时，`block` 丢弃全部转发 IPv6，`ula-only` 仅允许 ULA/Link-local，`allow` 显式放弃该保护；`hotspot-proxy` 本身不实现 IPv6 转发封禁。
+内置画像按“单一画像源”生成：UA、`sec-ch-ua`、`sec-ch-ua-full-version-list`、`sec-ch-ua-mobile` 与平台版本都来自同一浏览器版本/平台；Firefox 与 Safari 不携带 Chromium Client Hints。`ua_preset` 从内置 UA 库选择预设并自动套用完整 Header，不需要手输 UA；`user_agent_override` 仅保留给旧配置兼容。规则的 `profile: "default"` 会跟随 `default_profile`。`ipv6_guard_enabled` 是 Windows GUI 侧的 IPv6 转发封禁总开关，`ipv6_policy` 是封禁策略键：开关启用且检测到公网 IPv6 时，`block` 丢弃全部转发 IPv6，`ula-only` 仅允许 ULA/Link-local，`allow` 显式放弃该保护；`hotspot-proxy` 本身不实现 IPv6 转发封禁。`outbound_guard` 默认关闭，示例端口仅覆盖 QUIC、DoT、LLMNR、WS-D、NetBIOS 等旁路；全局 TUN 模式由代理层执行，Windows ICS 模式由 GUI 的 WinDivert 转发层执行，未在热点启动时启用时只影响配置，不改包。
 
 `monitor` 默认全部启用：`monitor.ua` 在 Header 改写前后记录原始 UA 与生效 UA；`monitor.tls` 只在 CONNECT/透明转发入口 `Peek` 首个 TLS record 并解析 SNI/JA3，不解密、不 MITM、不改变转发字节；解析超时（400ms）或非 TLS 首包会直接放行。`monitor.ttl` 由 Windows GUI 侧 `TrafficMonitor.cs` 使用 WinDivert `SNIFF` 只读捕获，按 `(协议, 目标 IP, 目标端口, 源端口)` 关联手机→电脑与 NAT 后电脑→网关的同流 TTL，按目标端点做 NAT 改端口兜底；同流 TTL 相差 1 时写入 `[probe][TTL证据]`。`monitor.dns` 由 Windows GUI 侧 `DnsMonitor.cs` 只读 sniff UDP:53：手机查询到达电脑但未见上行/回包时写 `[probe][DNS证据]` 判定代理未运行或拦截未生效；全局 TUN 模式仍运行该监控。DNS 与 TTL 共用 `TrafficMonitor.cs` 打开的一个 WinDivert `SNIFF` 句柄（TTL 在 TUN 模式下关闭但 DNS 继续），避免额外句柄在部分 Windows 上触发 `ERROR_NO_SYSTEM_RESOURCES(1450)`。若 `ip or ipv6` 过滤器打开失败（错误码 3/87），会先降级为 DNS-only UDP:53 监控；错误码 3 还会检查并自动清理指向旧路径的残留 WinDivert 服务后重试，仍失败时输出 `sc qc WinDivert` 路径与恢复步骤。90 秒内手机 UA≥3 且电脑 UA≥1，并在最后一次 UA 后 20 秒内出现断连时，代理写入 `[probe][监控证据]`；该结论仅作为诊断证据，不代表已经确认认证网关规则。
 

@@ -13,6 +13,7 @@ import (
 	"hotspot-proxy/internal/headers"
 	"hotspot-proxy/internal/monitor"
 	"hotspot-proxy/internal/netutil"
+	"hotspot-proxy/internal/outboundguard"
 )
 
 const (
@@ -72,6 +73,7 @@ type Device struct {
 	udpHandler     UDPHandler
 	httpEngine     *headers.Engine
 	monitor        *monitor.Tracker
+	outbound       *outboundguard.Guard
 	ipid           uint16
 	ttl            byte
 	mss            int
@@ -108,6 +110,8 @@ func (d *Device) SetUDPHandler(h UDPHandler) { d.udpHandler = h }
 func (d *Device) SetHTTPEngine(engine *headers.Engine) { d.httpEngine = engine }
 
 func (d *Device) SetMonitor(tracker *monitor.Tracker) { d.monitor = tracker }
+
+func (d *Device) SetOutboundGuard(guard *outboundguard.Guard) { d.outbound = guard }
 
 func (d *Device) SetTTL(ttl int) {
 	if ttl < 1 || ttl > 255 {
@@ -304,6 +308,9 @@ func (d *Device) handlePacket(pkt []byte) {
 
 	srcIP := net.IP(append([]byte(nil), pkt[12:16]...))
 	dstIP := net.IP(append([]byte(nil), pkt[16:20]...))
+	if d.outbound != nil && d.outbound.DropIPv4(pkt) {
+		return
+	}
 	t := pkt[ihl:]
 
 	if pkt[9] == udpProtocol {

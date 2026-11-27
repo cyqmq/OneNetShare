@@ -12,22 +12,23 @@ import (
 )
 
 type Config struct {
-	Enabled           bool               `json:"enabled"`
-	GUIGeneration     string             `json:"gui_generation,omitempty"`
-	Mode              string             `json:"mode"`
-	ListenHTTP        string             `json:"listen_http"`
-	ListenHTTPS       string             `json:"listen_https"`
-	DefaultProfile    string             `json:"default_profile"`
-	UAPreset          string             `json:"ua_preset,omitempty"`
-	UserAgentOverride string             `json:"user_agent_override,omitempty"`
-	Profiles          map[string]Profile `json:"profiles"`
-	Rules             []Rule             `json:"rules"`
-	Log               LogConfig          `json:"log"`
-	AutoReload        bool               `json:"auto_reload"`
-	Network           NetworkConfig      `json:"network"`
-	TUN               TUNConfig          `json:"tun"`
-	DeviceForge       DeviceForgeConfig  `json:"deviceforge"`
-	Monitor           MonitorConfig      `json:"monitor"`
+	Enabled           bool                `json:"enabled"`
+	GUIGeneration     string              `json:"gui_generation,omitempty"`
+	Mode              string              `json:"mode"`
+	ListenHTTP        string              `json:"listen_http"`
+	ListenHTTPS       string              `json:"listen_https"`
+	DefaultProfile    string              `json:"default_profile"`
+	UAPreset          string              `json:"ua_preset,omitempty"`
+	UserAgentOverride string              `json:"user_agent_override,omitempty"`
+	Profiles          map[string]Profile  `json:"profiles"`
+	Rules             []Rule              `json:"rules"`
+	Log               LogConfig           `json:"log"`
+	AutoReload        bool                `json:"auto_reload"`
+	Network           NetworkConfig       `json:"network"`
+	TUN               TUNConfig           `json:"tun"`
+	DeviceForge       DeviceForgeConfig   `json:"deviceforge"`
+	Monitor           MonitorConfig       `json:"monitor"`
+	OutboundGuard     OutboundGuardConfig `json:"outbound_guard"`
 }
 
 type MonitorConfig struct {
@@ -76,6 +77,18 @@ type DeviceForgeConfig struct {
 	DHCP     DHCPForgeConfig `json:"dhcp"`
 	Captive  CaptiveConfig   `json:"captive"`
 	Headers  bool            `json:"headers"`
+}
+
+type OutboundGuardConfig struct {
+	Enabled        bool  `json:"enabled"`
+	UDPPorts       []int `json:"udp_ports,omitempty"`
+	TCPPorts       []int `json:"tcp_ports,omitempty"`
+	BlockBroadcast bool  `json:"block_broadcast,omitempty"`
+	BlockMulticast bool  `json:"block_multicast,omitempty"`
+}
+
+func (c OutboundGuardConfig) IsEnabled() bool {
+	return c.Enabled && (len(c.UDPPorts) > 0 || len(c.TCPPorts) > 0 || c.BlockBroadcast || c.BlockMulticast)
 }
 
 type UDPForgeConfig struct {
@@ -289,6 +302,7 @@ func (l *Loader) applyDefaults(cfg *Config) {
 		cfg.DeviceForge.MDNS.Service = "_workstation._tcp.local"
 	}
 	applyCaptiveDefaults(&cfg.DeviceForge.Captive)
+	applyOutboundGuardDefaults(&cfg.OutboundGuard)
 	if len(cfg.Profiles) == 0 {
 		cfg.Profiles = BuiltinProfiles()
 	}
@@ -331,6 +345,33 @@ func (l *Loader) applyDefaults(cfg *Config) {
 		}
 		cfg.Profiles[cfg.DefaultProfile] = p
 	}
+}
+
+func applyOutboundGuardDefaults(c *OutboundGuardConfig) {
+	if !c.Enabled {
+		return
+	}
+	if len(c.UDPPorts) == 0 && len(c.TCPPorts) == 0 && !c.BlockBroadcast && !c.BlockMulticast {
+		c.UDPPorts = []int{443, 137, 138, 5355, 3702, 853}
+		c.TCPPorts = []int{139, 445, 853}
+		c.BlockBroadcast = true
+		c.BlockMulticast = true
+	}
+	c.UDPPorts = normalizePortList(c.UDPPorts)
+	c.TCPPorts = normalizePortList(c.TCPPorts)
+}
+
+func normalizePortList(ports []int) []int {
+	var result []int
+	seen := map[int]bool{}
+	for _, port := range ports {
+		if port < 1 || port > 65535 || seen[port] {
+			continue
+		}
+		seen[port] = true
+		result = append(result, port)
+	}
+	return result
 }
 
 func normalizeDNSServers(servers []string) []string {
@@ -413,6 +454,13 @@ func DefaultJSON() string {
     "ttl": 128
   },
   "monitor": {"enabled": true, "ttl": true, "ua": true, "tls": true},
+  "outbound_guard": {
+    "enabled": false,
+    "udp_ports": [443, 137, 138, 5355, 3702, 853],
+    "tcp_ports": [139, 445, 853],
+    "block_broadcast": true,
+    "block_multicast": true
+  },
   "deviceforge": {
     "enabled": true,
     "target_os": "windows-11",

@@ -22,6 +22,7 @@ namespace WifiHotspot
             AnalyzeConfig(configPath, lines);
             AnalyzeIPv6(configPath, lines);
             AnalyzePortal(configPath, lines);
+            AnalyzeOutboundGuard(configPath, lines);
             AnalyzeMonitor(configPath, lines);
             AnalyzePorts(configPath, lines);
             AnalyzeLog(processOutput, lines);
@@ -171,6 +172,33 @@ namespace WifiHotspot
                 lines.Add("[警告] 已启用 Portal 封堵，但主/备 IP 为空；请填写认证网关主 IP 和第二个 IP。");
             if (enabled && ips.Count > 0 && !PortalGuard.IsRunning)
                 lines.Add("[警告] Portal 封堵已配置但未运行；启动热点后会在 WinDivert FORWARD 层丢弃到这些 IP 的转发包。");
+        }
+
+        private static void AnalyzeOutboundGuard(string configPath, List<string> lines)
+        {
+            ProxySettings settings;
+            try
+            {
+                settings = ProxyConfigManager.Load(configPath);
+            }
+            catch (Exception ex)
+            {
+                lines.Add("[错误] 出站封堵配置读取失败: " + ex.Message);
+                return;
+            }
+
+            lines.Add("出站封堵: " + (settings.OutboundGuardEnabled ? "已启用" : "未启用") +
+                      "；规则=" + settings.OutboundPortsText +
+                      "；广播=" + settings.OutboundBlockBroadcast +
+                      "；组播=" + settings.OutboundBlockMulticast +
+                      "；" + (OutboundGuard.IsRunning ? "运行中" : "未运行"));
+            if (!settings.OutboundGuardEnabled) return;
+            if (settings.TunEnabled)
+                lines.Add("[正常] 全局 TUN 已启用，出站封堵由代理层执行；Windows GUI 不再重复打开 WinDivert 句柄。");
+            else if (!OutboundGuard.IsRunning)
+                lines.Add("[警告] 出站封堵已启用但未运行；启动热点后会在 WinDivert FORWARD 层丢弃匹配包并计数。");
+            else
+                lines.Add("[正常] 出站封堵运行统计: " + OutboundGuard.StatsText);
         }
 
         private static void AnalyzeMonitor(string configPath, List<string> lines)

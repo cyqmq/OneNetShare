@@ -344,6 +344,20 @@ namespace WifiHotspot
                         if (!portalResult.Success)
                             ShowHotspotDiagnosis("Portal 封堵启动失败：\n" + portalResult.Message, selected);
                     }
+                    if (settings.OutboundGuardEnabled)
+                    {
+                        if (settings.TunEnabled)
+                        {
+                            proxyMessage += "\n全局 TUN 模式由代理层执行出站封堵，跳过 WinDivert 出站封堵。";
+                        }
+                        else
+                        {
+                            var guardResult = OutboundGuard.Start(settings, hotspotIndex);
+                            proxyMessage += "\n" + guardResult.Message;
+                            if (!guardResult.Success)
+                                ShowHotspotDiagnosis("出站封堵启动失败：\n" + guardResult.Message, selected);
+                        }
+                    }
                     if (settings.MonitorEnabled && (settings.MonitorTtl || settings.MonitorDns))
                     {
                         var monitorResult = TrafficMonitor.Shared.Start(settings);
@@ -383,6 +397,8 @@ namespace WifiHotspot
                     if (settings.IPv6GuardEnabled || IPv6Guard.IsRunning)
                         proxyMessage += "\n" + IPv6Guard.Stop().Message;
                     proxyMessage += "\n" + PortalGuard.Stop().Message;
+                    if (settings.OutboundGuardEnabled || OutboundGuard.IsRunning)
+                        proxyMessage += "\n" + OutboundGuard.Stop().Message;
                     if (settings.MonitorEnabled || TrafficMonitor.Shared.IsRunning || DnsMonitor.Shared.IsRunning)
                         proxyMessage += "\n" + TrafficMonitor.Shared.Stop().Message;
                 }

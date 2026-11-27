@@ -47,6 +47,10 @@ namespace WifiHotspot
         public bool PortalBlockEnabled { get; set; }
         public string PortalPrimaryIP { get; set; }
         public string PortalSecondaryIP { get; set; }
+        public bool OutboundGuardEnabled { get; set; }
+        public string OutboundPortsText { get; set; }
+        public bool OutboundBlockBroadcast { get; set; }
+        public bool OutboundBlockMulticast { get; set; }
         public bool MonitorEnabled { get; set; }
         public bool MonitorTtl { get; set; }
         public bool MonitorUa { get; set; }
@@ -56,6 +60,9 @@ namespace WifiHotspot
 
     public static class ProxyConfigManager
     {
+        private static readonly int[] DefaultOutboundUDPPorts = new[] { 443, 137, 138, 5355, 3702, 853 };
+        private static readonly int[] DefaultOutboundTCPPorts = new[] { 139, 445, 853 };
+
         public static string DefaultConfigPath
         {
             get { return Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "config.json"); }
@@ -79,6 +86,9 @@ namespace WifiHotspot
             IDictionary<string, object> network = GetDict(root, "network");
             IDictionary<string, object> tun = GetDict(root, "tun");
             IDictionary<string, object> monitor = GetDict(root, "monitor");
+            IDictionary<string, object> outboundGuard = GetDict(root, "outbound_guard");
+            int[] outboundUDPPorts = GetIntArray(outboundGuard, "udp_ports", DefaultOutboundUDPPorts);
+            int[] outboundTCPPorts = GetIntArray(outboundGuard, "tcp_ports", DefaultOutboundTCPPorts);
             string profile = GetString(root, "default_profile", "chrome-win11");
 
             return new ProxySettings
@@ -122,6 +132,10 @@ namespace WifiHotspot
                 PortalBlockEnabled = GetBool(root, "portal_block_enabled", false),
                 PortalPrimaryIP = GetString(root, "portal_primary_ip", ""),
                 PortalSecondaryIP = GetString(root, "portal_secondary_ip", ""),
+                OutboundGuardEnabled = GetBool(outboundGuard, "enabled", false),
+                OutboundPortsText = BuildPortsText(outboundUDPPorts, outboundTCPPorts),
+                OutboundBlockBroadcast = GetBool(outboundGuard, "block_broadcast", true),
+                OutboundBlockMulticast = GetBool(outboundGuard, "block_multicast", true),
                 MonitorEnabled = GetBool(monitor, "enabled", true),
                 MonitorTtl = GetBool(monitor, "ttl", true),
                 MonitorUa = GetBool(monitor, "ua", true),
@@ -224,6 +238,16 @@ namespace WifiHotspot
             SetString(root, "portal_secondary_ip", settings.PortalSecondaryIP ?? "");
             SetBool(root, "gui_auto_start_proxy", settings.AutoStartProxy);
 
+            IDictionary<string, object> outboundGuard = GetOrCreateDict(root, "outbound_guard");
+            int[] outboundUDPPorts;
+            int[] outboundTCPPorts;
+            ParsePortsText(settings.OutboundPortsText, out outboundUDPPorts, out outboundTCPPorts);
+            SetBool(outboundGuard, "enabled", settings.OutboundGuardEnabled);
+            outboundGuard["udp_ports"] = ToObjectArray(outboundUDPPorts);
+            outboundGuard["tcp_ports"] = ToObjectArray(outboundTCPPorts);
+            SetBool(outboundGuard, "block_broadcast", settings.OutboundBlockBroadcast);
+            SetBool(outboundGuard, "block_multicast", settings.OutboundBlockMulticast);
+
             IDictionary<string, object> monitor = GetOrCreateDict(root, "monitor");
             SetBool(monitor, "enabled", settings.MonitorEnabled);
             SetBool(monitor, "ttl", settings.MonitorTtl);
@@ -268,6 +292,74 @@ namespace WifiHotspot
             SetBool(GetOrCreateDict(deviceforge, "captive"), "enabled", settings.Captive);
 
             File.WriteAllText(configPath, serializer.Serialize(root), new UTF8Encoding(false));
+        }
+
+        private static int[] GetIntArray(IDictionary<string, object> dict, string key, int[] fallback)
+        {
+            object value;
+            if (dict == null || !dict.TryGetValue(key, out value)) return fallback;
+            var result = new List<int>();
+            var items = value as object[];
+            if (items != null)
+            {
+                foreach (object item in items) AddPort(result, Convert.ToString(item));
+            }
+            else
+            {
+                var list = value as System.Collections.ArrayList;
+                if (list != null)
+                {
+                    foreach (object item in list) AddPort(result, Convert.ToString(item));
+                }
+                else
+                {
+                    foreach (string part in (Convert.ToString(value) ?? "").Split(new[] { ',', ';', ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries)) AddPort(result, part);
+                }
+            }
+            return result.Count == 0 ? fallback : result.ToArray();
+        }
+
+        private static void AddPort(List<int> result, string text)
+        {
+            int port;
+            if (!int.TryParse((text ?? "").Trim(), out port) || port < 1 || port > 65535 || result.Contains(port)) return;
+            result.Add(port);
+        }
+
+        private static string BuildPortsText(int[] udpPorts, int[] tcpPorts)
+        {
+            var parts = new List<string>();
+            if (udpPorts != null && udpPorts.Length > 0) parts.Add("udp:" + string.Join(",", Array.ConvertAll(udpPorts, p => p.ToString())));
+            if (tcpPorts != null && tcpPorts.Length > 0) parts.Add("tcp:" + string.Join(",", Array.ConvertAll(tcpPorts, p => p.ToString())));
+            return string.Join(";", parts.ToArray());
+        }
+
+        public static void ParsePortsText(string text, out int[] udpPorts, out int[] tcpPorts)
+        {
+            var udp = new List<int>();
+            var tcp = new List<int>();
+            foreach (string group in (text ?? "").Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                string value = group.Trim();
+                if (value.StartsWith("udp:", StringComparison.OrdinalIgnoreCase))
+                {
+                    foreach (string part in value.Substring(4).Split(new[] { ',', ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries)) AddPort(udp, part);
+                }
+                else if (value.StartsWith("tcp:", StringComparison.OrdinalIgnoreCase))
+                {
+                    foreach (string part in value.Substring(4).Split(new[] { ',', ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries)) AddPort(tcp, part);
+                }
+            }
+            udpPorts = udp.Count == 0 ? DefaultOutboundUDPPorts : udp.ToArray();
+            tcpPorts = tcp.Count == 0 ? DefaultOutboundTCPPorts : tcp.ToArray();
+        }
+
+        private static object[] ToObjectArray(int[] values)
+        {
+            if (values == null) return new object[0];
+            var result = new object[values.Length];
+            for (int i = 0; i < values.Length; i++) result[i] = values[i];
+            return result;
         }
 
         private static IDictionary<string, object> GetDict(IDictionary<string, object> parent, string key)
@@ -393,6 +485,13 @@ namespace WifiHotspot
   ""gui_auto_start_proxy"": true,
 
    ""monitor"": { ""enabled"": true, ""ttl"": true, ""ua"": true, ""tls"": true, ""dns"": true },
+   ""outbound_guard"": {
+     ""enabled"": false,
+     ""udp_ports"": [443, 137, 138, 5355, 3702, 853],
+     ""tcp_ports"": [139, 445, 853],
+     ""block_broadcast"": true,
+     ""block_multicast"": true
+   },
    ""network"": { ""enabled"": false, ""ttl"": 128, ""ipid"": true, ""tcp_options"": true, ""forward"": true, ""mtu_clamp_enabled"": false, ""mss_clamp"": 1460 },
   ""tun"": { ""enabled"": false, ""name"": ""OneNetShare Tunnel"", ""ip"": ""10.66.0.1"", ""gateway_ip"": ""10.66.0.2"", ""prefix_len"": 24, ""route"": true, ""upstream_interface"": """", ""ttl"": 128 },
   ""log"": { ""level"": ""info"", ""file"": "" },

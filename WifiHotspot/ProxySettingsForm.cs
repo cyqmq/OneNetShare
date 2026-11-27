@@ -56,6 +56,8 @@ namespace WifiHotspot
         private readonly CheckBox chkPortalBlock;
         private readonly TextBox txtPortalPrimary;
         private readonly TextBox txtPortalSecondary;
+        private readonly CheckBox chkOutboundGuard;
+        private readonly TextBox txtOutboundPorts;
         private readonly CheckBox chkMonitorEnabled;
         private readonly CheckBox chkMonitorTtl;
         private readonly CheckBox chkMonitorUa;
@@ -78,14 +80,14 @@ namespace WifiHotspot
             MaximizeBox = true;
             MinimizeBox = false;
             ShowInTaskbar = false;
-            ClientSize = new Size(680, 760);
+            ClientSize = new Size(680, 830);
             Font = new Font("Microsoft YaHei", 9F, FontStyle.Regular, GraphicsUnit.Point, 134);
 
-            var content = new Panel { Dock = DockStyle.Fill, AutoScroll = true, AutoScrollMinSize = new Size(0, 1120) };
-            var implemented = new GroupBox { Text = "已实现功能", Location = new Point(12, 12), Size = new Size(640, 545) };
-            var monitorGroup = new GroupBox { Text = "核心监控（只读，不改包）", Location = new Point(12, 560), Size = new Size(640, 125) };
-            var missing = new GroupBox { Text = "未实现功能", Location = new Point(12, 695), Size = new Size(640, 100) };
-            var note = new Label { Location = new Point(15, 505), Size = new Size(600, 30), ForeColor = Color.Gray };
+            var content = new Panel { Dock = DockStyle.Fill, AutoScroll = true, AutoScrollMinSize = new Size(0, 1210) };
+            var implemented = new GroupBox { Text = "已实现功能", Location = new Point(12, 12), Size = new Size(640, 585) };
+            var monitorGroup = new GroupBox { Text = "核心监控（只读，不改包）", Location = new Point(12, 600), Size = new Size(640, 125) };
+            var missing = new GroupBox { Text = "未实现功能", Location = new Point(12, 735), Size = new Size(640, 100) };
+            var note = new Label { Location = new Point(15, 545), Size = new Size(600, 30), ForeColor = Color.Gray };
             note.Text = "内嵌 DNS 在全局 TUN / Linux redirect 的 UDP:53 拦截路径生效，先查本地缓存，未命中时经出口网卡 DNS 上游查询；ICS 原生模式下 53 由 Windows ICS 占用。WinDivert 只读监控 UDP:53 验证“手机是否发出”和“电脑是否转发”。TUN 与 WinDivert 网络层归一化互斥。";
 
             var lblMode = new Label { Location = new Point(15, 28), AutoSize = true, Text = "运行模式: forward (Windows)" };
@@ -169,6 +171,10 @@ namespace WifiHotspot
             btnDetectDns = NewButton("读取出口 DNS", 130);
             btnDetectDns.Location = new Point(340, 475);
             btnDetectDns.Click += DetectDnsServers;
+            chkOutboundGuard = NewCheck("启用出站封堵（QUIC/组播/DoT/LLMNR/WS-D）", settings.OutboundGuardEnabled, 15, 505);
+            var lblOutboundPorts = new Label { Location = new Point(330, 508), AutoSize = true, Text = "端口:" };
+            txtOutboundPorts = NewText(settings.OutboundPortsText, 375, 505, 245);
+            txtOutboundPorts.Enabled = settings.OutboundGuardEnabled;
 
             chkMonitorEnabled = NewCheck("核心监控总开关", settings.MonitorEnabled, 15, 24);
             chkMonitorTtl = NewCheck("TTL 跳数变化 (WinDivert sniff)", settings.MonitorTtl, 155, 24);
@@ -194,6 +200,7 @@ namespace WifiHotspot
             chkTun.CheckedChanged += delegate { chkNetwork.Enabled = !chkTun.Checked; };
             chkNetwork.Enabled = !settings.TunEnabled;
             chkIpv6Guard.CheckedChanged += delegate { cmbIpv6Policy.Enabled = chkIpv6Guard.Checked; };
+            chkOutboundGuard.CheckedChanged += delegate { txtOutboundPorts.Enabled = chkOutboundGuard.Checked; };
             cmbIpv6Policy.Enabled = settings.IPv6GuardEnabled;
             chkMtuClamp.CheckedChanged += delegate { numMssClamp.Enabled = chkMtuClamp.Checked; };
             cmbProfile.SelectedIndexChanged += delegate { ApplyProfileTTL(); };
@@ -258,6 +265,9 @@ namespace WifiHotspot
             implemented.Controls.Add(txtPortalSecondary);
             implemented.Controls.Add(chkDnsEmbedded);
             implemented.Controls.Add(btnDetectDns);
+            implemented.Controls.Add(chkOutboundGuard);
+            implemented.Controls.Add(lblOutboundPorts);
+            implemented.Controls.Add(txtOutboundPorts);
             implemented.Controls.Add(note);
 
             var chkWebRtc = NewCheck("WebRTC 本地 IP 防泄漏（未实现）", false, 15, 18);
@@ -281,7 +291,7 @@ namespace WifiHotspot
             monitorGroup.Controls.Add(lblMonitorStatus);
             monitorGroup.Controls.Add(btnToggleMonitor);
 
-            var grpProbe = new GroupBox { Text = "探针日志 / 连通性测试", Location = new Point(12, 805), Size = new Size(640, 250) };
+            var grpProbe = new GroupBox { Text = "探针日志 / 连通性测试", Location = new Point(12, 840), Size = new Size(640, 250) };
             txtProbeLog = new TextBox { Multiline = true, ReadOnly = true, Dock = DockStyle.Fill, ScrollBars = ScrollBars.Vertical, BackColor = Color.White, Font = new Font("Consolas", 9F) };
             var probePanel = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 44, FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(6, 6, 6, 6) };
             var btnTest = NewButton("一键连通性测试", 150);
@@ -296,13 +306,14 @@ namespace WifiHotspot
             grpProbe.Controls.Add(txtProbeLog);
             grpProbe.Controls.Add(probePanel);
 
-            lblResult = new Label { Location = new Point(12, 1065), Size = new Size(640, 30), ForeColor = Color.DarkGreen };
+            lblResult = new Label { Location = new Point(12, 1100), Size = new Size(640, 30), ForeColor = Color.DarkGreen };
             lblResult.Text = (ProxyProcessManager.IsRunning() ? "代理运行" : "代理未运行") +
                              "；Wintun.dll " + (HotspotManager.WintunAvailable() ? "存在" : "缺失") +
                              "；网络层归一化 " + (NetworkNormalizer.Shared.IsRunning ? "运行" : "未运行（" + NetworkNormalizer.Shared.LastMessage + "）") +
                              "；IPv6 封禁 " + (!settings.IPv6GuardEnabled ? "已关闭" : (IPv6Guard.IsRunning ? "运行" : "未运行")) +
-                             "；Portal " + (PortalGuard.IsRunning ? "运行" : "未运行") +
-                              "；TTL 监控 " + TrafficMonitor.Shared.StatusText +
+                              "；Portal " + (PortalGuard.IsRunning ? "运行" : "未运行") +
+                              "；出站封堵 " + (settings.OutboundGuardEnabled ? (OutboundGuard.IsRunning ? "运行" : "未运行") : "已关闭") +
+                               "；TTL 监控 " + TrafficMonitor.Shared.StatusText +
                               "；DNS 监控 " + DnsMonitor.Shared.StatusText;
             lblMonitorStatus.Text = MonitorStatusText();
 
@@ -566,12 +577,15 @@ namespace WifiHotspot
             string http = TestHttpRewrite();
             string tun = TestTunRoute();
             string ipv6 = ProxyDiagnostics.CheckIPv6Safety();
+            string identity = StatusValue(GetProxyStatus(), "identity");
             bool httpOK = http.StartsWith("HTTP 改写生效", StringComparison.Ordinal);
             bool tunOK = tun.StartsWith("TUN 路由正常", StringComparison.Ordinal) || tun.StartsWith("TUN 未开启", StringComparison.Ordinal);
             bool ipv6OK = ipv6.StartsWith("IPv6 安全", StringComparison.Ordinal);
-            return httpOK && tunOK && ipv6OK
-                ? "全副武装，请放心冲浪；" + http + "；" + tun + "；" + ipv6
-                : "仍需检查；" + http + "；" + tun + "；" + ipv6;
+            bool identityOK = identity == "ok" || identity == "未知";
+            bool allOK = httpOK && tunOK && ipv6OK && identityOK;
+            return allOK
+                ? "全副武装，请放心冲浪；" + http + "；" + tun + "；" + ipv6 + "；画像一致性=" + identity
+                : "仍需检查；" + http + "；" + tun + "；" + ipv6 + "；画像一致性=" + identity;
         }
 
         private static Dictionary<string, string> GetProxyStatus()
@@ -834,6 +848,7 @@ namespace WifiHotspot
         private ProxySettings Collect()
         {
             bool tun = chkTun.Checked;
+            ProxySettings current = ProxyConfigManager.Load(_configPath);
             return new ProxySettings
             {
                 Enabled = chkEnabled.Checked,
@@ -875,6 +890,10 @@ namespace WifiHotspot
                 PortalBlockEnabled = chkPortalBlock.Checked,
                 PortalPrimaryIP = txtPortalPrimary.Text.Trim(),
                 PortalSecondaryIP = txtPortalSecondary.Text.Trim(),
+                OutboundGuardEnabled = chkOutboundGuard.Checked,
+                OutboundPortsText = txtOutboundPorts.Text.Trim(),
+                OutboundBlockBroadcast = current.OutboundBlockBroadcast,
+                OutboundBlockMulticast = current.OutboundBlockMulticast,
                 MonitorEnabled = chkMonitorEnabled.Checked,
                 MonitorTtl = chkMonitorTtl.Checked,
                 MonitorUa = chkMonitorUa.Checked,
@@ -896,7 +915,7 @@ namespace WifiHotspot
         {
             ProxySettings settings = Collect();
             ProxyConfigManager.Save(settings, _configPath);
-            lblResult.Text = "配置已保存。" + ApplyNetwork(settings) + "；" + ApplyIPv6Guard(settings) + "；" + ApplyMonitor(settings) + TuneWarning(settings);
+            lblResult.Text = "配置已保存。" + ApplyNetwork(settings) + "；" + ApplyIPv6Guard(settings) + "；" + ApplyOutboundGuard(settings) + "；" + ApplyMonitor(settings) + TuneWarning(settings);
             lblMonitorStatus.Text = MonitorStatusText();
         }
 
@@ -905,7 +924,7 @@ namespace WifiHotspot
             ProxySettings settings = Collect();
             ProxyConfigManager.Save(settings, _configPath);
             string result = ProxyProcessManager.IsRunning() ? ProxyProcessManager.Stop() + "；" + ProxyProcessManager.Start(_configPath) : ProxyProcessManager.Start(_configPath);
-            lblResult.Text = result + "；" + ApplyNetwork(settings) + "；" + ApplyIPv6Guard(settings) + "；" + ApplyMonitor(settings) + TuneWarning(settings);
+            lblResult.Text = result + "；" + ApplyNetwork(settings) + "；" + ApplyIPv6Guard(settings) + "；" + ApplyOutboundGuard(settings) + "；" + ApplyMonitor(settings) + TuneWarning(settings);
             lblMonitorStatus.Text = MonitorStatusText();
             ShowProxyDiagnosticIfNeeded();
         }
@@ -967,6 +986,13 @@ namespace WifiHotspot
             if (!settings.IPv6GuardEnabled) return IPv6Guard.Stop().Message;
             if (ProxyDiagnostics.FindHotspotGlobalIPv6().Count == 0) return "IPv6 封禁已启用（当前无公网 IPv6，不启动）";
             return IPv6Guard.Start(settings.IPv6Policy).Message;
+        }
+
+        private static string ApplyOutboundGuard(ProxySettings settings)
+        {
+            if (!settings.OutboundGuardEnabled) return OutboundGuard.Stop().Message;
+            if (settings.TunEnabled) return "全局 TUN 模式下出站封堵由代理层执行";
+            return OutboundGuard.Start(settings).Message;
         }
 
         private static string ApplyMonitor(ProxySettings settings)

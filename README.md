@@ -40,6 +40,8 @@
 - Wintun 全局 TUN 接管：创建 `OneNetShare Tunnel` 虚拟网卡，只接管 IPv4 默认路由/DNS，在用户态重建 UDP/DNS/NTP 会话并统一出口包指纹，TCP 80 流同样应用 HTTP Header 画像；需要官方 x86 `wintun.dll` 和管理员权限
 - 管理路由账本：代理读取配置目录旁的 `managedroutes.json`，启动前全量预检冲突，发现 VPN/代理/其他接口占用目标路由时拒绝启动且不删除他人路由；只添加账本中的精确 IPv4 路由，退出/重载时按 `(prefix, interface, gateway, metric)` 精确清理，不修改全局网卡跃点。HTTP `User-Agent` 在 TUN 80 流中按原始 Header 长度等长改写，避免包长变化；默认路由必须显式 `allow_default_route`，否则拒绝
 - IPv6 隐私保护：可在 GUI 中一键启用/关闭 IPv6 转发封禁。启用时，若热点虚拟网卡检测到公网/全局 IPv6(GUA) 则在 WinDivert `NETWORK_FORWARD` 层丢弃转发 IPv6，防止手机绕过 IPv4 NAT/代理裸奔；仅 ULA/Link-local 时不启动封禁；可选仅允许 ULA/Link-local 或显式允许 IPv6（不安全）。关闭后不启动 WinDivert 封禁。
+- 画像一致性自检：代理启动/重载时检查 UA、Client Hints、目标 OS、TUN TTL 与 DHCP Vendor Class 是否属于同一画像；`/status` 输出 `identity=ok|warn` 与具体 `identity_issue`，一键连通性测试同步显示结果
+- 可选出站封堵：默认关闭；启用后在热点转发层丢弃 QUIC UDP443、DoT 853、LLMNR 5355、WS-D 3702、广播/组播等，并输出丢弃计数；全局 TUN 模式由代理层执行，ICS 模式由 WinDivert 执行。规则与验证步骤见 [`docs/校园网防共享调研与验证.md`](docs/校园网防共享调研与验证.md)
 - 自动配置 ICS（Internet Connection Sharing）网络共享
 - 可自定义 SSID、密码（8-63 位 WPA2）
 - 选择用于共享上网的物理网卡；有线入口模式还可单独选择无线热点网卡
@@ -65,6 +67,7 @@ winx86-hotspot/
 │   ├── ProxyConfigManager.cs    # proxy/config.json 读写
 │   ├── ProxyProcessManager.cs   # hotspot-proxy.exe 启停
 │   ├── NetworkNormalizer.cs     # WinDivert 网络层 TTL/IPID/TCP 归一化
+│   ├── OutboundGuard.cs         # 可选出站封堵与计数
 │   ├── TrafficMonitor.cs        # WinDivert 只读 TTL 变化监控
 │   ├── DnsMonitor.cs            # WinDivert 只读 UDP:53 到达/转发验证
 │   ├── app.config               # .NET 运行时配置

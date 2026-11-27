@@ -16,6 +16,13 @@
     "ua": true,
     "tls": true
   },
+  "outbound_guard": {
+    "enabled": false,
+    "udp_ports": [443, 137, 138, 5355, 3702, 853],
+    "tcp_ports": [139, 445, 853],
+    "block_broadcast": true,
+    "block_multicast": true
+  },
   "network": {
     "enabled": false,
     "ttl": 128,

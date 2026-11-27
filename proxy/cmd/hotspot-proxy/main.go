@@ -17,6 +17,7 @@ import (
 	"hotspot-proxy/internal/deviceforge"
 	"hotspot-proxy/internal/headers"
 	"hotspot-proxy/internal/monitor"
+	"hotspot-proxy/internal/outboundguard"
 	"hotspot-proxy/internal/proxy"
 	"hotspot-proxy/internal/routes"
 	"hotspot-proxy/internal/tun"
@@ -69,16 +70,26 @@ func main() {
 	}
 
 	var forge *deviceforge.Manager
+	var outbound *outboundguard.Guard
 	loader, err := config.NewLoader(path, func(c *config.Config) {
 		logger.Printf("配置已加载: mode=%s enabled=%v rules=%d", c.Mode, c.Enabled, len(c.Rules))
 		if forge != nil {
 			forge.Reload(c)
+		}
+		if outbound != nil {
+			outbound.Reload(c.OutboundGuard)
+			logger.Printf("出站封堵: %s", outbound.Stats().Format())
+		}
+		identity := config.CheckIdentity(c)
+		for i := range identity.Issues {
+			logger.Printf("[probe][画像一致性] %s", identity.IssueLine(i))
 		}
 	})
 	if err != nil {
 		logger.Fatalf("配置错误: %v", err)
 	}
 	forge = deviceforge.NewManager(loader, logger)
+	outbound = outboundguard.New(loader.Get().OutboundGuard, logger)
 	tracker := monitor.New(logger, func() bool { return loader.Get().Monitor.IsEnabled() })
 
 	cfg := loader.Get()
@@ -91,6 +102,7 @@ func main() {
 		tunDev.SetTTL(cfg.TUN.TTL)
 		tunDev.SetHTTPEngine(headers.NewEngine(loader, tracker))
 		tunDev.SetMonitor(tracker)
+		tunDev.SetOutboundGuard(outbound)
 		if cfg.Network.MtuClamp {
 			tunDev.SetMSS(cfg.Network.MssClamp)
 		}
@@ -130,7 +142,7 @@ func main() {
 		stopCh := make(chan struct{})
 		var stopOnce sync.Once
 		stop := func() { stopOnce.Do(func() { close(stopCh) }) }
-		go startStatusServer(loader, logger, stop, tracker, forge, routeManager)
+		go startStatusServer(loader, logger, stop, tracker, forge, routeManager, outbound)
 		go func() {
 			if err := tunDev.Run(); err != nil {
 				logger.Printf("TUN 运行错误: %v", err)
@@ -198,7 +210,7 @@ func main() {
 	var stopOnce sync.Once
 	stop := func() { stopOnce.Do(func() { close(stopCh) }) }
 	go startReloadWatcher(loader, logger, routeManager, stopCh)
-	go startStatusServer(loader, logger, stop, tracker, forge, routeManager)
+	go startStatusServer(loader, logger, stop, tracker, forge, routeManager, outbound)
 
 	logger.Printf("%s 启动完成 (http=%s https=%s mode=%s)",
 		version.String(), cfg.ListenHTTP, cfg.ListenHTTPS, cfg.Mode)
@@ -251,13 +263,19 @@ func startReloadWatcher(loader *config.Loader, logger *log.Logger, routeManager 
 	}
 }
 
-func startStatusServer(loader *config.Loader, logger *log.Logger, stop func(), tracker *monitor.Tracker, forge *deviceforge.Manager, routeManager *routes.Manager) {
+func startStatusServer(loader *config.Loader, logger *log.Logger, stop func(), tracker *monitor.Tracker, forge *deviceforge.Manager, routeManager *routes.Manager, outbound *outboundguard.Guard) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/status", func(w http.ResponseWriter, r *http.Request) {
 		cfg := loader.Get()
 		exe, _ := os.Executable()
 		fmt.Fprintf(w, "version=%s revision=%s pid=%d exe=%s\n", version.String(), version.Revision, os.Getpid(), exe)
 		fmt.Fprintf(w, "generation=%s\n", cfg.GUIGeneration)
+		identity := config.CheckIdentity(cfg)
+		fmt.Fprintf(w, "identity=%s ua_browser=%s ua_platform=%s ua_target=%s tun_ttl=%d identity_issues=%d\n",
+			identity.Status, identity.Browser, identity.Platform, identity.TargetOS, identity.TTL, len(identity.Issues))
+		for i := range identity.Issues {
+			fmt.Fprintf(w, "identity_issue=%s\n", identity.IssueLine(i))
+		}
 		fmt.Fprintf(w, "mode=%s enabled=%v profile=%s ua_preset=%s user_agent_override=%s rules=%d tun=%v\n",
 			cfg.Mode, cfg.Enabled, cfg.DefaultProfile, cfg.UAPreset, cfg.UserAgentOverride, len(cfg.Rules), cfg.TUN.Enabled)
 		fmt.Fprintf(w, "deviceforge=%v target=%s udp=%v dns=%v ntp=%v mdns=%v dhcp=%v captive=%v/%s headers=%v\n",
@@ -269,6 +287,9 @@ func startStatusServer(loader *config.Loader, logger *log.Logger, stop func(), t
 		fmt.Fprintf(w, "monitor=%v/%v/%v/%v ua_phone=%d ua_desktop=%d tls=%d alerts=%d\n",
 			cfg.Monitor.IsEnabled(), cfg.Monitor.IsTTL(), cfg.Monitor.IsUA(), cfg.Monitor.IsTLS(),
 			stats.Phone, stats.Desktop, stats.TLS, stats.Alerts)
+		if outbound != nil {
+			fmt.Fprintf(w, "outbound_guard=%s\n", outbound.Stats().Format())
+		}
 		dnsStats := forge.DNSStats()
 		fmt.Fprintf(w, "dns_embedded=%v dns_cache=%d dns_queries=%d dns_hits=%d dns_misses=%d dns_upstream_ok=%d dns_upstream_err=%d\n",
 			cfg.DeviceForge.DNS.IsEmbedded(), cfg.DeviceForge.DNS.CacheSize,
