@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -23,6 +24,10 @@ import (
 	"hotspot-proxy/internal/tun"
 	"hotspot-proxy/internal/version"
 )
+
+var processStartedAt = time.Now()
+var configReloads atomic.Uint64
+var lastConfigReload atomic.Int64
 
 func main() {
 	showVersion := flag.Bool("version", false, "显示版本")
@@ -71,7 +76,10 @@ func main() {
 
 	var forge *deviceforge.Manager
 	var outbound *outboundguard.Guard
+	var headerEngine *headers.Engine
 	loader, err := config.NewLoader(path, func(c *config.Config) {
+		configReloads.Add(1)
+		lastConfigReload.Store(time.Now().UnixNano())
 		logger.Printf("配置已加载: mode=%s enabled=%v rules=%d", c.Mode, c.Enabled, len(c.Rules))
 		if forge != nil {
 			forge.Reload(c)
@@ -91,6 +99,7 @@ func main() {
 	forge = deviceforge.NewManager(loader, logger)
 	outbound = outboundguard.New(loader.Get().OutboundGuard, logger)
 	tracker := monitor.New(logger, func() bool { return loader.Get().Monitor.IsEnabled() })
+	headerEngine = headers.NewEngine(loader, tracker)
 
 	cfg := loader.Get()
 
@@ -100,7 +109,7 @@ func main() {
 			logger.Fatalf("TUN 初始化失败: %v", err)
 		}
 		tunDev.SetTTL(cfg.TUN.TTL)
-		tunDev.SetHTTPEngine(headers.NewEngine(loader, tracker))
+		tunDev.SetHTTPEngine(headerEngine)
 		tunDev.SetMonitor(tracker)
 		tunDev.SetOutboundGuard(outbound)
 		if cfg.Network.MtuClamp {
@@ -133,6 +142,7 @@ func main() {
 		}
 
 		proxyServer := proxy.NewServer(loader, logger, tracker)
+		proxyServer.SetHeaderEngine(headerEngine)
 		go func() {
 			if err := proxyServer.Run(cfg.ListenHTTP); err != nil {
 				logger.Printf("HTTP 代理启动失败: %v", err)
@@ -142,7 +152,7 @@ func main() {
 		stopCh := make(chan struct{})
 		var stopOnce sync.Once
 		stop := func() { stopOnce.Do(func() { close(stopCh) }) }
-		go startStatusServer(loader, logger, stop, tracker, forge, routeManager, outbound)
+		go startStatusServer(loader, logger, stop, tracker, forge, routeManager, outbound, headerEngine)
 		go func() {
 			if err := tunDev.Run(); err != nil {
 				logger.Printf("TUN 运行错误: %v", err)
@@ -187,6 +197,7 @@ func main() {
 	}
 
 	srv := proxy.NewServer(loader, logger, tracker)
+	srv.SetHeaderEngine(headerEngine)
 
 	if cfg.Mode == "forward" && cfg.ListenHTTPS == "" {
 		cfg.ListenHTTPS = "127.0.0.1:18443"
@@ -210,7 +221,7 @@ func main() {
 	var stopOnce sync.Once
 	stop := func() { stopOnce.Do(func() { close(stopCh) }) }
 	go startReloadWatcher(loader, logger, routeManager, stopCh)
-	go startStatusServer(loader, logger, stop, tracker, forge, routeManager, outbound)
+	go startStatusServer(loader, logger, stop, tracker, forge, routeManager, outbound, headerEngine)
 
 	logger.Printf("%s 启动完成 (http=%s https=%s mode=%s)",
 		version.String(), cfg.ListenHTTP, cfg.ListenHTTPS, cfg.Mode)
@@ -263,12 +274,18 @@ func startReloadWatcher(loader *config.Loader, logger *log.Logger, routeManager 
 	}
 }
 
-func startStatusServer(loader *config.Loader, logger *log.Logger, stop func(), tracker *monitor.Tracker, forge *deviceforge.Manager, routeManager *routes.Manager, outbound *outboundguard.Guard) {
+func startStatusServer(loader *config.Loader, logger *log.Logger, stop func(), tracker *monitor.Tracker, forge *deviceforge.Manager, routeManager *routes.Manager, outbound *outboundguard.Guard, headerEngine *headers.Engine) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/status", func(w http.ResponseWriter, r *http.Request) {
 		cfg := loader.Get()
 		exe, _ := os.Executable()
 		fmt.Fprintf(w, "version=%s revision=%s pid=%d exe=%s\n", version.String(), version.Revision, os.Getpid(), exe)
+		lastReloadAge := int64(-1)
+		if last := lastConfigReload.Load(); last > 0 {
+			lastReloadAge = int64(time.Since(time.Unix(0, last)).Seconds())
+		}
+		fmt.Fprintf(w, "runtime=uptime_seconds=%d start_time=%s config_reloads=%d last_reload_age_seconds=%d\n",
+			int64(time.Since(processStartedAt).Seconds()), processStartedAt.Format(time.RFC3339), configReloads.Load(), lastReloadAge)
 		fmt.Fprintf(w, "generation=%s\n", cfg.GUIGeneration)
 		identity := config.CheckIdentity(cfg)
 		fmt.Fprintf(w, "identity=%s ua_browser=%s ua_platform=%s ua_target=%s tun_ttl=%d identity_issues=%d\n",
@@ -283,6 +300,9 @@ func startStatusServer(loader *config.Loader, logger *log.Logger, stop func(), t
 			cfg.DeviceForge.DNS.Enabled, cfg.DeviceForge.NTP.Enabled,
 			cfg.DeviceForge.MDNS.Enabled, cfg.DeviceForge.DHCP.Enabled,
 			cfg.DeviceForge.Captive.Enabled, cfg.DeviceForge.Captive.Mode, cfg.DeviceForge.Headers)
+		if headerEngine != nil {
+			fmt.Fprintf(w, "header_plane=%s\n", headerEngine.Stats().Format())
+		}
 		stats := tracker.Stats()
 		fmt.Fprintf(w, "monitor=%v/%v/%v/%v ua_phone=%d ua_desktop=%d tls=%d alerts=%d\n",
 			cfg.Monitor.IsEnabled(), cfg.Monitor.IsTTL(), cfg.Monitor.IsUA(), cfg.Monitor.IsTLS(),

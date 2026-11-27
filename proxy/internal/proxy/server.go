@@ -42,6 +42,12 @@ func NewServer(loader *config.Loader, logger *log.Logger, trackers ...*monitor.T
 	}
 }
 
+func (s *Server) SetHeaderEngine(engine *headers.Engine) {
+	if engine != nil {
+		s.engine = engine
+	}
+}
+
 func (s *Server) handleCaptive(client net.Conn, req *headers.Request) bool {
 	path := req.Path
 	if idx := strings.Index(path, "://"); idx >= 0 {

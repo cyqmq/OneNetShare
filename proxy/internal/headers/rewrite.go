@@ -4,8 +4,10 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"net"
 	"net/textproto"
 	"strings"
+	"sync"
 
 	"hotspot-proxy/internal/config"
 	"hotspot-proxy/internal/monitor"
@@ -111,9 +113,23 @@ func splitHostPort(hostport string) (string, string, error) {
 	return hostport, "", nil
 }
 
+type Stats struct {
+	Local        uint64
+	Forward      uint64
+	CaptiveScrub uint64
+	LeakScrub    uint64
+}
+
+func (s Stats) Format() string {
+	return fmt.Sprintf("local=%d forward=%d captive_scrub=%d leak_scrub=%d",
+		s.Local, s.Forward, s.CaptiveScrub, s.LeakScrub)
+}
+
 type Engine struct {
 	loader  *config.Loader
 	monitor *monitor.Tracker
+	mu      sync.Mutex
+	stats   Stats
 }
 
 func NewEngine(loader *config.Loader, trackers ...*monitor.Tracker) *Engine {
@@ -125,6 +141,40 @@ func NewEngine(loader *config.Loader, trackers ...*monitor.Tracker) *Engine {
 }
 
 func (e *Engine) SetMonitor(tracker *monitor.Tracker) { e.monitor = tracker }
+
+func (e *Engine) Stats() Stats {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.stats
+}
+
+func planeFromClient(client string) string {
+	host := strings.TrimSpace(client)
+	if parsed, _, err := net.SplitHostPort(host); err == nil {
+		host = parsed
+	}
+	host = strings.Trim(host, "[]")
+	if host == "" || host == "::1" || strings.HasPrefix(host, "127.") {
+		return "local"
+	}
+	return "forward"
+}
+
+func (e *Engine) recordStats(plane string, captiveScrub, leakScrub int) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if plane == "local" {
+		e.stats.Local++
+	} else {
+		e.stats.Forward++
+	}
+	if captiveScrub > 0 {
+		e.stats.CaptiveScrub += uint64(captiveScrub)
+	}
+	if leakScrub > 0 {
+		e.stats.LeakScrub += uint64(leakScrub)
+	}
+}
 
 func originalRequest(req *Request) string {
 	var sb strings.Builder
@@ -142,6 +192,7 @@ func (e *Engine) Rewrite(req *Request, originalDst string) (string, string, erro
 
 func (e *Engine) RewriteWithClient(req *Request, originalDst, client string) (string, string, error) {
 	cfg := e.loader.Get()
+	plane := planeFromClient(client)
 	originalUA, _ := headerValueFromHeaders(req.Headers, "User-Agent")
 	recordUA := func(effective string) {
 		if e.monitor != nil {
@@ -149,6 +200,7 @@ func (e *Engine) RewriteWithClient(req *Request, originalDst, client string) (st
 		}
 	}
 	if !cfg.Enabled || !cfg.DeviceForge.Enabled || !cfg.DeviceForge.Headers {
+		e.recordStats(plane, 0, 0)
 		recordUA(originalUA)
 		return req.Proto, originalRequest(req), nil
 	}
@@ -223,15 +275,26 @@ func (e *Engine) RewriteWithClient(req *Request, originalDst, client string) (st
 	} else if p, ok := config.BuiltinProfiles()["chrome-win11"]; ok {
 		headers = normalizeFingerprintHeaders(headers, p.Headers)
 	}
+	captiveScrub := 0
 	if cfg.DeviceForge.Captive.Enabled && isCaptiveProbe(req, cfg) {
-		headers = removeHeaders(headers, []string{"Referer", "Origin"})
+		before := len(headers)
+		names := make([]string, 0)
+		for _, header := range headers {
+			if isCaptiveLeakHeader(header.Key) {
+				names = append(names, header.Key)
+			}
+		}
+		headers = removeHeaders(headers, names)
+		captiveScrub = before - len(headers)
 	}
 
 	// Always strip proxy-leak headers unless explicitly re-added by rule
+	before := len(headers)
 	headers = removeHeaders(headers, []string{
 		"X-Forwarded-For", "X-Real-IP", "X-Forwarded-Proto",
 		"Forwarded", "Via", "Proxy-Connection", "Proxy-Authorization",
 	})
+	e.recordStats(plane, captiveScrub, before-len(headers))
 
 	uri := req.URI
 	if strings.HasPrefix(uri, "http://") && cfg.Mode == "forward" {
@@ -408,12 +471,21 @@ func matchRule(rule config.Rule, host, path string) bool {
 }
 
 func normalizeFingerprintHeaders(headers []Header, profileHeaders map[string]string) []Header {
-	for _, name := range []string{"Accept-Language", "Accept-Encoding"} {
+	for _, name := range []string{"Accept", "Accept-Language", "Accept-Encoding"} {
 		if val, ok := headerValue(profileHeaders, name); ok {
 			headers = setHeaders(headers, map[string]string{name: val})
 		}
 	}
 	return headers
+}
+
+func isCaptiveLeakHeader(name string) bool {
+	lower := strings.ToLower(strings.TrimSpace(name))
+	switch lower {
+	case "referer", "origin", "accept", "priority", "upgrade-insecure-requests":
+		return true
+	}
+	return strings.HasPrefix(lower, "accept-") || strings.HasPrefix(lower, "sec-fetch-")
 }
 
 func isCaptiveProbe(req *Request, cfg *config.Config) bool {

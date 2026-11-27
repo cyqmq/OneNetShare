@@ -42,6 +42,9 @@
 - IPv6 隐私保护：可在 GUI 中一键启用/关闭 IPv6 转发封禁。启用时，若热点虚拟网卡检测到公网/全局 IPv6(GUA) 则在 WinDivert `NETWORK_FORWARD` 层丢弃转发 IPv6，防止手机绕过 IPv4 NAT/代理裸奔；仅 ULA/Link-local 时不启动封禁；可选仅允许 ULA/Link-local 或显式允许 IPv6（不安全）。关闭后不启动 WinDivert 封禁。
 - 画像一致性自检：代理启动/重载时检查 UA、Client Hints、目标 OS、TUN TTL 与 DHCP Vendor Class 是否属于同一画像；`/status` 输出 `identity=ok|warn` 与具体 `identity_issue`，一键连通性测试同步显示结果
 - 可选出站封堵：默认关闭；启用后在热点转发层丢弃 QUIC UDP443、DoT 853、LLMNR 5355、WS-D 3702、广播/组播等，并输出丢弃计数；全局 TUN 模式由代理层执行，ICS 模式由 WinDivert 执行。规则与验证步骤见 [`docs/校园网防共享调研与验证.md`](docs/校园网防共享调研与验证.md)
+- Captive 探针 Header 清理：HTTP 探测请求清除 `Referer`、`Origin`、`Accept*`、`Sec-Fetch-*`、`Priority`、`Upgrade-Insecure-Requests`，并把本机代理探针与 LAN/TUN 转发请求分别计数；`/status` 输出 `header_plane=local=... forward=... captive_scrub=... leak_scrub=...`，GUI 一键测试显示本机/转发两平面证据
+- 会话计时与运行时证据：GUI 显示最近热点启动耗时、停止时显示最近在线时长；代理 `/status` 输出 `runtime=uptime_seconds=... start_time=... config_reloads=... last_reload_age_seconds=...`
+- OpenWrt 运维：init 脚本改为 procd `respawn` watchdog，安装规则幂等，脚本提供 `status`/`reset-counters`，输出 nat/mangle/filter 计数器并检测 MTK HNAT/PPE 绕过风险
 - 自动配置 ICS（Internet Connection Sharing）网络共享
 - 可自定义 SSID、密码（8-63 位 WPA2）
 - 选择用于共享上网的物理网卡；有线入口模式还可单独选择无线热点网卡
@@ -66,6 +69,7 @@ winx86-hotspot/
 │   ├── ProxySettingsForm.cs     # 代理功能开关窗口
 │   ├── ProxyConfigManager.cs    # proxy/config.json 读写
 │   ├── ProxyProcessManager.cs   # hotspot-proxy.exe 启停
+│   ├── HotspotTiming.cs         # 热点启动耗时与在线时长
 │   ├── NetworkNormalizer.cs     # WinDivert 网络层 TTL/IPID/TCP 归一化
 │   ├── OutboundGuard.cs         # 可选出站封堵与计数
 │   ├── TrafficMonitor.cs        # WinDivert 只读 TTL 变化监控

@@ -143,6 +143,59 @@ func TestRewriteStripsRefererOnCaptiveProbe(t *testing.T) {
 	}
 }
 
+func TestRewriteScrubsCaptiveHeadersAndCountsPlane(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	data := `{"enabled":true,"mode":"forward","default_profile":"chrome-win11","rules":[],"deviceforge":{"enabled":true,"headers":true,"captive":{"enabled":true,"domains":["captive.apple.com"],"dns_domains":["captive.apple.com"],"paths":["/hotspot-detect.html"]}},"profiles":{}}`
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loader, err := config.NewLoader(path, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine := NewEngine(loader)
+	req := &Request{
+		Method: "GET", URI: "http://captive.apple.com/hotspot-detect.html", Proto: "HTTP/1.1", Host: "captive.apple.com", Path: "/hotspot-detect.html",
+		Headers: []Header{
+			{Key: "User-Agent", Value: "Mozilla/5.0"},
+			{Key: "Referer", Value: "http://captive.apple.com/"},
+			{Key: "Origin", Value: "http://captive.apple.com"},
+			{Key: "Accept-Language", Value: "en-US"},
+			{Key: "Accept-Encoding", Value: "gzip"},
+			{Key: "Sec-Fetch-Site", Value: "none"},
+			{Key: "X-Forwarded-For", Value: "203.0.113.9"},
+		},
+	}
+	_, rewritten, err := engine.RewriteWithClient(req, "", "127.0.0.1:1234")
+	if err != nil {
+		t.Fatal(err)
+	}
+	lower := strings.ToLower(rewritten)
+	for _, name := range []string{"\r\nreferer:", "\r\norigin:", "\r\naccept-language:", "\r\naccept-encoding:", "\r\nsec-fetch-site:", "\r\nx-forwarded-for:"} {
+		if strings.Contains(lower, name) {
+			t.Fatalf("captive 探针仍包含 %s: %s", name, rewritten)
+		}
+	}
+	stats := engine.Stats()
+	if stats.Local != 1 || stats.Forward != 0 {
+		t.Fatalf("本机面统计错误: %+v", stats)
+	}
+	if stats.CaptiveScrub < 5 || stats.LeakScrub != 1 {
+		t.Fatalf("清理计数错误: %+v", stats)
+	}
+	forwardReq := &Request{
+		Method: "GET", URI: "http://example.com/", Proto: "HTTP/1.1", Host: "example.com", Path: "/",
+		Headers: []Header{{Key: "User-Agent", Value: "Mozilla/5.0"}},
+	}
+	if _, _, err := engine.RewriteWithClient(forwardReq, "", "192.168.137.2:5555"); err != nil {
+		t.Fatal(err)
+	}
+	stats = engine.Stats()
+	if stats.Forward != 1 || stats.Local != 1 {
+		t.Fatalf("转发面统计错误: %+v", stats)
+	}
+}
+
 func TestRewriteWithClientExactPreservesHeaderLength(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	data := `{"enabled":true,"mode":"tun","default_profile":"chrome-win11","rules":[],"deviceforge":{"enabled":true,"headers":true},"profiles":{}}`

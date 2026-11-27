@@ -18,10 +18,10 @@ install_rules() {
     iptables -t nat -F HOTSPOT_PROXY
 
     portal_nat_returns
-    iptables -t nat -A HOTSPOT_PROXY -d 127.0.0.0/8 -j RETURN
-    iptables -t nat -A HOTSPOT_PROXY -p tcp --dport 80 -j REDIRECT --to-ports $HTTP_PORT
-    iptables -t nat -A HOTSPOT_PROXY -p tcp --dport 443 -j REDIRECT --to-ports $HTTPS_PORT
-    iptables -t nat -I PREROUTING 1 -s "$LAN_NET" -p tcp -j HOTSPOT_PROXY
+    iptables_append_unique nat HOTSPOT_PROXY -d 127.0.0.0/8 -j RETURN
+    iptables_append_unique nat HOTSPOT_PROXY -p tcp --dport 80 -j REDIRECT --to-ports "$HTTP_PORT"
+    iptables_append_unique nat HOTSPOT_PROXY -p tcp --dport 443 -j REDIRECT --to-ports "$HTTPS_PORT"
+    iptables_insert_unique nat PREROUTING -s "$LAN_NET" -p tcp -j HOTSPOT_PROXY
     install_portal_rules
 
     echo "iptables REDIRECT 规则已安装 (LAN=$LAN_NET)"
@@ -44,11 +44,15 @@ install_service() {
 #!/bin/sh /etc/rc.common
 START=96
 STOP=10
-start() {
-    /usr/bin/hotspot-proxy --config /etc/hotspot-proxy/config.json >/dev/null 2>&1 &
-}
-stop() {
-    killall hotspot-proxy 2>/dev/null
+USE_PROCD=1
+
+start_service() {
+    procd_open_instance
+    procd_set_param command /usr/bin/hotspot-proxy --config /etc/hotspot-proxy/config.json
+    procd_set_param respawn 3600 5 0
+    procd_set_param stdout 1
+    procd_set_param stderr 1
+    procd_close_instance
 }
 EOF
     chmod +x /etc/init.d/hotspot-proxy
@@ -74,10 +78,14 @@ case "$1" in
         ;;
     status)
         ps | grep '[h]otspot-proxy' || echo "进程未运行"
-        iptables -t nat -L HOTSPOT_PROXY -n -v 2>/dev/null || echo "规则未安装"
+        /etc/init.d/hotspot-proxy status 2>/dev/null || echo "procd 状态不可用"
+        capture_counter_status
         portal_block_status
         ;;
+    reset-counters)
+        reset_capture_counters
+        ;;
     *)
-        echo "用法: $0 {install|uninstall|rules-only|status}"
+        echo "用法: $0 {install|uninstall|rules-only|status|reset-counters}"
         ;;
 esac

@@ -296,6 +296,7 @@ namespace WifiHotspot
             lblStatus.Text = "正在启动热点，请稍候...";
             Application.DoEvents();
 
+            HotspotTiming.BeginStart();
             HotspotResult result = IsWiredWifiMode()
                 ? _manager.StartWiredWifi(selected, selectedWireless, txtSsid.Text, txtPassword.Text)
                 : _manager.Start(selected, txtSsid.Text, txtPassword.Text);
@@ -370,10 +371,14 @@ namespace WifiHotspot
                 {
                     proxyMessage = "\n代理自动启动失败: " + ex.Message;
                 }
-                MessageBox.Show(result.Message + proxyMessage, "启动结果", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                HotspotTiming.EndStart(true);
+                MessageBox.Show(result.Message + proxyMessage + "\n" + HotspotTiming.StatusText, "启动结果", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             else
+            {
+                HotspotTiming.EndStart(false);
                 ShowHotspotDiagnosis(result.Message, selected, selectedWireless);
+            }
 
             CheckSupportAndStatus();
         }
@@ -403,7 +408,8 @@ namespace WifiHotspot
                         proxyMessage += "\n" + TrafficMonitor.Shared.Stop().Message;
                 }
                 catch { }
-                MessageBox.Show(result.Message + proxyMessage, "停止结果", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                HotspotTiming.EndSession();
+                MessageBox.Show(result.Message + proxyMessage + "\n" + HotspotTiming.StatusText, "停止结果", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
             else
                 ShowHotspotDiagnosis(result.Message, null);

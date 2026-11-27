@@ -18,6 +18,7 @@ namespace WifiHotspot
             var lines = new List<string>();
             lines.Add("代理自动诊断");
             lines.Add(exitCode.HasValue ? "进程退出码: " + exitCode.Value : "进程状态: 未捕获退出码");
+            lines.Add("热点会话: " + HotspotTiming.StatusText);
 
             AnalyzeConfig(configPath, lines);
             AnalyzeIPv6(configPath, lines);

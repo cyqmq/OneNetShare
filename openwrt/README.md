@@ -139,3 +139,15 @@ PORTAL_PRIMARY_IP=10.0.0.1 PORTAL_SECONDARY_IP=10.0.0.2 sh /root/portal-block.sh
 ```
 
 顺序陷阱：REDIRECT/TPROXY 在 nat/mangle 表，先于 filter FORWARD。只在 FORWARD DROP，重定向后的流量不会走 FORWARD，计数器永远是 0。脚本会先在 nat/mangle 中对 portal IP `RETURN`，再安装 `HOTSPOT_PORTAL` DROP 链；`setup-openwrt.sh` / `setup-capture.sh` 已默认调用该顺序。
+
+重复执行 `install` 时，所有 PREROUTING jump 与 UDP REDIRECT 都先 `iptables -C` 检查再插入/追加，不会叠加规则。init 脚本使用 `USE_PROCD=1` 与 `respawn 3600 5 0` 由 procd  watchdog 拉起异常退出的代理进程。
+
+验证前先清零计数器，再让一台客户端实际访问 HTTP/HTTPS：
+
+```sh
+sh /root/setup-openwrt.sh reset-counters
+sh /root/setup-openwrt.sh status
+curl http://127.0.0.1:18089/status
+```
+
+`status` 会输出 nat/mangle/filter 链计数和 `HNAT/PPE` 检测。若检测到 MTK HNAT/PPE 而规则计数长期为 0，优先检查硬件 NAT 是否绕过 iptables，不要继续叠加 DROP/REDIRECT 规则。

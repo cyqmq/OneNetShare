@@ -577,15 +577,24 @@ namespace WifiHotspot
             string http = TestHttpRewrite();
             string tun = TestTunRoute();
             string ipv6 = ProxyDiagnostics.CheckIPv6Safety();
-            string identity = StatusValue(GetProxyStatus(), "identity");
+            Dictionary<string, string> status = GetProxyStatus();
+            string identity = StatusValue(status, "identity");
+            string localPlane = StatusValue(status, "local");
+            string forwardPlane = StatusValue(status, "forward");
+            string plane = localPlane == "未知"
+                ? "Header 平面=未知"
+                : "Header 平面=本机" + localPlane + "/转发" + forwardPlane;
+            string uptime = StatusValue(status, "uptime_seconds");
+            string runtime = uptime == "未知" ? string.Empty : "；代理在线=" + uptime + "s";
+            string evidence = "；" + plane + "；画像一致性=" + identity + runtime;
             bool httpOK = http.StartsWith("HTTP 改写生效", StringComparison.Ordinal);
             bool tunOK = tun.StartsWith("TUN 路由正常", StringComparison.Ordinal) || tun.StartsWith("TUN 未开启", StringComparison.Ordinal);
             bool ipv6OK = ipv6.StartsWith("IPv6 安全", StringComparison.Ordinal);
             bool identityOK = identity == "ok" || identity == "未知";
             bool allOK = httpOK && tunOK && ipv6OK && identityOK;
             return allOK
-                ? "全副武装，请放心冲浪；" + http + "；" + tun + "；" + ipv6 + "；画像一致性=" + identity
-                : "仍需检查；" + http + "；" + tun + "；" + ipv6 + "；画像一致性=" + identity;
+                ? "全副武装，请放心冲浪；" + http + "；" + tun + "；" + ipv6 + evidence
+                : "仍需检查；" + http + "；" + tun + "；" + ipv6 + evidence;
         }
 
         private static Dictionary<string, string> GetProxyStatus()
@@ -1005,7 +1014,8 @@ namespace WifiHotspot
 
         private static string MonitorStatusText()
         {
-            return "代理侧 HTTP UA / TLS SNI+JA3 随代理进程启用；" + TrafficMonitor.Shared.StatusText +
+            return "代理侧 HTTP UA / TLS SNI+JA3 随代理进程启用；" + HotspotTiming.StatusText +
+                   "；" + TrafficMonitor.Shared.StatusText +
                    "；" + DnsMonitor.Shared.StatusText;
         }
 

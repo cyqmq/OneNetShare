@@ -62,16 +62,20 @@ DNS/NTP/QUIC/游戏等 UDP 由 `net.DialUDP` 从网关新建 socket，WAN 侧 UD
 - `reply`：DNS 查询匹配 `dns_domains` 时返回 `reply_ip`（默认网关 IP）的 A 记录；HTTP 请求匹配 `domains` + `paths` 时由网关直接返回 `http_code` / `http_body`。
 - `drop`：DNS 查询静默丢弃；HTTP 探测直接断开；HTTPS CONNECT 按 Host 匹配时直接断开。
 
-HTTPS Captive 探测无法在不解密的情况下伪造 HTTP 响应；本版本对匹配 Host 的 CONNECT 采用断开处理，避免探测到达 WAN。
+HTTPS Captive 探测无法在不解密的情况下伪造 HTTP 响应；本版本对匹配 Host 的 CONNECT 采用断开处理，避免探测到达 WAN。HTTP 探测还会清除 `Referer`、`Origin`、`Accept*`、`Sec-Fetch-*`、`Priority`、`Upgrade-Insecure-Requests`，避免本机探针 header 泄露到 WAN；非探测流量的 `Accept` 与画像同源归一。
 
 ### 画像一致性自检与出站封堵
 
 `config.CheckIdentity` 在代理启动和配置重载时运行，检查默认画像是否同时满足：UA 可解析、`sec-ch-ua-platform` / `sec-ch-ua-mobile` / 版本与 UA 同源、`deviceforge.target_os` 与 UA 平台同族、开启 TUN 时 TTL 与平台匹配（Windows 128，其他 64）、开启 DHCP 伪造时 Vendor Class 与平台匹配。`/status` 示例：
 
 ```text
+runtime=uptime_seconds=42 start_time=2026-11-27T21:23:02+08:00 config_reloads=1 last_reload_age_seconds=5
 identity=ok ua_browser=chrome ua_platform=Windows ua_target=windows-11 tun_ttl=128 identity_issues=0
+header_plane=local=1 forward=0 captive_scrub=0 leak_scrub=1
 outbound_guard=enabled=false udp=[443,137,138,5355,3702,853] tcp=[139,445,853] broadcast=true multicast=true dropped=0 ...
 ```
+
+`header_plane` 把本机 `127.0.0.1` 代理探针与 LAN/TUN 转发请求分开计数；转发面为 0 时需用手机实际访问网页产生样本，不能只靠 GUI 回显判断。`runtime` 提供代理在线秒数、启动时间、配置重载次数与最近重载年龄。
 
 `outbound_guard.enabled=true` 时，如果规则全为空会自动填入 QUIC/DoT/LLMNR/WS-D/NetBIOS 端口与广播/组播规则。TUN 模式下 Go 代理在 IPv4 包进入状态机前丢弃匹配包并计数；Windows ICS 模式下由 GUI 的 `OutboundGuard` 在 WinDivert `NETWORK_FORWARD` 层丢弃并统计。两种模式都先观测计数，再决定是否长期启用；不要默认套用外部项目的固定阈值。
 
@@ -269,19 +273,23 @@ ssh root@192.168.1.1 'PORTAL_PRIMARY_IP=10.0.0.1 PORTAL_SECONDARY_IP=10.0.0.2 sh
 脚本会：
 1. 安装二进制到 `/usr/bin/hotspot-proxy`
 2. 复制配置到 `/etc/hotspot-proxy/config.json`
-3. 创建 `/etc/init.d/hotspot-proxy` 并 enable
-4. 安装 iptables REDIRECT/TPROXY 规则（LAN 网段自动检测）
+3. 创建 `/etc/init.d/hotspot-proxy` 并 enable，使用 procd `respawn 3600 5 0` 作为进程 watchdog
+4. 安装 iptables REDIRECT/TPROXY 规则（LAN 网段自动检测），所有 PREROUTING jump 与 UDP REDIRECT 均先 `-C` 再插入/追加，重复执行不会叠加
 5. 在 nat/mangle 的 REDIRECT/TPROXY 前插入 portal IP `RETURN`，并在 `filter FORWARD` 安装 `HOTSPOT_PORTAL` DROP 链；portal IP 通过 `PORTAL_PRIMARY_IP` / `PORTAL_SECONDARY_IP` / `PORTAL_IPS` 或 UCI `hotspot-proxy.portal.*` 指定
 
 验证：
 ```sh
 /etc/init.d/hotspot-proxy status
+sh /root/setup-openwrt.sh status
+sh /root/setup-openwrt.sh reset-counters
 curl http://127.0.0.1:18089/status
-iptables -t nat -L HOTSPOT_PROXY -n -v
-iptables -t filter -L HOTSPOT_PORTAL -n -v
+iptables -t nat -L HOTSPOT_PROXY -n -v -x
+iptables -t filter -L HOTSPOT_PORTAL -n -v -x
 ```
 
-`/status` 会输出 `version`、`revision`、`pid`、`exe`、`generation`、当前 `ua_preset` 以及 `monitor=总开关/TTL/UA/TLS`（GUI 配置另有 `monitor.dns`）、`ua_phone`、`ua_desktop`、`tls`、`alerts`，以及 `dns_embedded`、`dns_cache`、`dns_queries`、`dns_hits`、`dns_misses`、`dns_upstream_ok`、`dns_upstream_err`、`managed_routes`；GUI 用 `generation` 判断 18080 上的进程是否仍是当前配置，不匹配会自动重启该进程。
+`setup-openwrt.sh status` 同时输出 nat/mangle/filter 计数器与 `HNAT/PPE` 检测；MTK HNAT 启用时若计数器长期为 0，应检查硬件转发绕过，而不是只增加规则。`reset-counters` 用 `-Z` 清零计数器，便于做一次可重复的客户端验证。
+
+`/status` 会输出 `version`、`revision`、`pid`、`exe`、`runtime`（`uptime_seconds` / `start_time` / `config_reloads` / `last_reload_age_seconds`）、`generation`、`identity` / `identity_issue`、当前 `ua_preset`、`header_plane`（`local` / `forward` / `captive_scrub` / `leak_scrub`）、`outbound_guard`，以及 `monitor=总开关/TTL/UA/TLS`（GUI 配置另有 `monitor.dns`）、`ua_phone`、`ua_desktop`、`tls`、`alerts`，以及 `dns_embedded`、`dns_cache`、`dns_queries`、`dns_hits`、`dns_misses`、`dns_upstream_ok`、`dns_upstream_err`、`managed_routes`；GUI 用 `generation` 判断 18080 上的进程是否仍是当前配置，不匹配会自动重启该进程。
 
 ### Windows 原型
 

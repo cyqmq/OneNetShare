@@ -1,6 +1,6 @@
 #!/bin/sh
 # OpenWrt 接管方式安装脚本
-# 用法: sh setup-capture.sh {tun|tproxy|redirect} [install|uninstall]
+# 用法: sh setup-capture.sh {tun|tproxy|redirect} [install|uninstall|status|reset-counters]
 
 MODE="${1:-tun}"
 ACTION="${2:-install}"
@@ -52,11 +52,17 @@ PYEOF
 #!/bin/sh /etc/rc.common
 START=96
 STOP=10
-start() {
+USE_PROCD=1
+
+start_service() {
     modprobe tun 2>/dev/null
-    /usr/bin/hotspot-proxy --config /etc/hotspot-proxy/config.json >/dev/null 2>&1 &
+    procd_open_instance
+    procd_set_param command /usr/bin/hotspot-proxy --config /etc/hotspot-proxy/config.json
+    procd_set_param respawn 3600 5 0
+    procd_set_param stdout 1
+    procd_set_param stderr 1
+    procd_close_instance
 }
-stop() { killall hotspot-proxy 2>/dev/null; }
 EOF
     ip rule add fwmark 0x2 lookup main pref 100 2>/dev/null
     ip route add default dev tun0 table 101 2>/dev/null
@@ -75,11 +81,11 @@ install_tproxy() {
     iptables -t mangle -F HOTSPOT_TPROXY
 
     portal_mangle_returns
-    iptables -t mangle -A HOTSPOT_TPROXY -d "$LAN_NET" -j RETURN
-    iptables -t mangle -A HOTSPOT_TPROXY -p tcp --dport 80 -j TPROXY --on-port $HTTP_PORT --tproxy-mark 0x1
-    iptables -t mangle -A HOTSPOT_TPROXY -p tcp --dport 443 -j TPROXY --on-port $HTTPS_PORT --tproxy-mark 0x1
-    iptables -t mangle -A HOTSPOT_TPROXY -p udp -j TPROXY --on-port 18500 --tproxy-mark 0x1
-    iptables -t mangle -I PREROUTING 1 -j HOTSPOT_TPROXY
+    iptables_append_unique mangle HOTSPOT_TPROXY -d "$LAN_NET" -j RETURN
+    iptables_append_unique mangle HOTSPOT_TPROXY -p tcp --dport 80 -j TPROXY --on-port "$HTTP_PORT" --tproxy-mark 0x1
+    iptables_append_unique mangle HOTSPOT_TPROXY -p tcp --dport 443 -j TPROXY --on-port "$HTTPS_PORT" --tproxy-mark 0x1
+    iptables_append_unique mangle HOTSPOT_TPROXY -p udp -j TPROXY --on-port 18500 --tproxy-mark 0x1
+    iptables_insert_unique mangle PREROUTING -j HOTSPOT_TPROXY
     install_portal_rules
 
     # 策略路由
@@ -91,11 +97,11 @@ install_tproxy() {
 
 install_redirect() {
     sh "$(dirname "$0")/setup-openwrt.sh" install
-    iptables -t nat -I HOTSPOT_PROXY 1 -d 127.0.0.0/8 -j RETURN 2>/dev/null
-    iptables -t nat -A HOTSPOT_PROXY -p udp --dport 53 -j REDIRECT --to-ports 18053 2>/dev/null
-    iptables -t nat -A HOTSPOT_PROXY -p udp --dport 123 -j REDIRECT --to-ports 18123 2>/dev/null
-    iptables -t nat -A HOTSPOT_PROXY -p udp --dport 443 -j REDIRECT --to-ports 18443 2>/dev/null
-    iptables -t nat -A HOTSPOT_PROXY -p udp --dport 5353 -j REDIRECT --to-ports 23353 2>/dev/null
+    iptables_insert_unique nat HOTSPOT_PROXY -d 127.0.0.0/8 -j RETURN
+    iptables_append_unique nat HOTSPOT_PROXY -p udp --dport 53 -j REDIRECT --to-ports 18053
+    iptables_append_unique nat HOTSPOT_PROXY -p udp --dport 123 -j REDIRECT --to-ports 18123
+    iptables_append_unique nat HOTSPOT_PROXY -p udp --dport 443 -j REDIRECT --to-ports 18443
+    iptables_append_unique nat HOTSPOT_PROXY -p udp --dport 5353 -j REDIRECT --to-ports 23353
     echo "REDIRECT UDP 规则已安装 (53/123/443/5353)"
 }
 
@@ -125,5 +131,7 @@ case "$ACTION" in
         esac
         ;;
     uninstall) uninstall ;;
-    *) echo "用法: $0 {tun|tproxy|redirect} {install|uninstall}" ;;
+    status) sh "$(dirname "$0")/setup-openwrt.sh" status ;;
+    reset-counters) reset_capture_counters ;;
+    *) echo "用法: $0 {tun|tproxy|redirect} {install|uninstall|status|reset-counters}" ;;
 esac
