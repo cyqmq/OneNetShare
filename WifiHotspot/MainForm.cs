@@ -22,12 +22,16 @@ namespace WifiHotspot
         private string _savedTopologyMode = "auto";
         private string _savedWirelessAdapterId;
         private string _lastClientsKey;
+        private string _lastDashboardClientsKey;
         private int _statusBusy;
         private int _clientsBusy;
         private int _adaptersBusy;
+        private int _diagnosisBusy;
         private bool _applyingAdapters;
         private bool _shuttingDown;
         private StatusSnapshot _latestSnapshot;
+        private ProxySettingsForm _proxyForm;
+        private DateTime _lastStatusRefresh;
 
         private enum FeatureHealth
         {
@@ -87,6 +91,7 @@ namespace WifiHotspot
             }
 
             LoadConfig();
+            WireDashboardClicks();
             RequestAdaptersRefresh();
             LoadFeatureSwitches();
             StartNetworkNormalizer();
@@ -311,9 +316,9 @@ namespace WifiHotspot
         private void SetHotspotButtons(bool startEnabled, bool stopEnabled)
         {
             btnStart.Enabled = startEnabled;
-            btnQuickStart.Enabled = startEnabled;
+            btnDashboardStart.Enabled = startEnabled;
             btnStop.Enabled = stopEnabled;
-            btnQuickStop.Enabled = stopEnabled;
+            btnDashboardStop.Enabled = stopEnabled;
         }
 
         private void ShowHotspotDiagnosis(string message, IcsManager.NetworkAdapterInfo adapter, IcsManager.NetworkAdapterInfo wirelessAdapter = null)
@@ -381,6 +386,30 @@ namespace WifiHotspot
             finally
             {
                 lstClients.EndUpdate();
+            }
+        }
+
+        private void ApplyDashboardClients(List<string> clients, bool running)
+        {
+            if (_shuttingDown || IsDisposed) return;
+            string key = running && clients != null && clients.Count > 0
+                ? string.Join("\n", clients.ToArray())
+                : "empty";
+            if (key == _lastDashboardClientsKey) return;
+            _lastDashboardClientsKey = key;
+            lstDashboardClients.BeginUpdate();
+            try
+            {
+                lstDashboardClients.Items.Clear();
+                if (!running || clients == null || clients.Count == 0)
+                    lstDashboardClients.Items.Add("暂无已连接设备");
+                else
+                    foreach (var client in clients)
+                        lstDashboardClients.Items.Add(client);
+            }
+            finally
+            {
+                lstDashboardClients.EndUpdate();
             }
         }
 
@@ -524,10 +553,7 @@ namespace WifiHotspot
 
         private void btnProxy_Click(object sender, EventArgs e)
         {
-            using (var form = new ProxySettingsForm())
-                form.ShowDialog(this);
-            LoadFeatureSwitches();
-            CheckSupportAndStatus();
+            ShowProxyPage();
         }
 
         private void navDashboard_Click(object sender, EventArgs e)
@@ -553,21 +579,99 @@ namespace WifiHotspot
             RefreshMonitorLog();
         }
 
-        private void btnSideProxy_Click(object sender, EventArgs e)
+        private void btnDashboardRefresh_Click(object sender, EventArgs e)
         {
-            btnProxy_Click(sender, e);
+            RequestAdaptersRefresh();
+            RequestStatusRefresh();
+            RefreshMonitorLog();
         }
 
-        private void btnSideDiagnosis_Click(object sender, EventArgs e)
+        private void btnDashboardDiagnosis_Click(object sender, EventArgs e)
         {
-            var diagnosis = _manager.Diagnose(ModuleStatusText(), null, txtSsid.Text, txtPassword.Text);
-            using (var form = new DiagnosisForm(diagnosis))
-                form.ShowDialog(this);
+            if (Interlocked.Exchange(ref _diagnosisBusy, 1) != 0) return;
+            string ssid = txtSsid.Text;
+            string password = txtPassword.Text;
+            string summary = _latestSnapshot != null ? _latestSnapshot.Text : "正在检测...";
+            ThreadPool.QueueUserWorkItem(delegate(object state)
+            {
+                try
+                {
+                    var diagnosis = _manager.Diagnose(summary, null, ssid, password);
+                    BeginInvoke(new Action(() =>
+                    {
+                        try
+                        {
+                            using (var form = new DiagnosisForm(diagnosis))
+                                form.ShowDialog(this);
+                        }
+                        finally
+                        {
+                            Interlocked.Exchange(ref _diagnosisBusy, 0);
+                        }
+                    }));
+                }
+                catch
+                {
+                    Interlocked.Exchange(ref _diagnosisBusy, 0);
+                    BeginInvoke(new Action(() => MessageBox.Show(this, "生成诊断报告失败。", "错误", MessageBoxButtons.OK, MessageBoxIcon.Error)));
+                }
+            });
+        }
+
+        private void navProxy_Click(object sender, EventArgs e)
+        {
+            ShowProxyPage();
+        }
+
+        private void ShowProxyPage()
+        {
+            ShowPage(pageProxy, navProxy, "代理设置", "高级参数、测试与诊断");
+            if (_proxyForm == null || _proxyForm.IsDisposed) CreateProxyPageControl();
+        }
+
+        private void CreateProxyPageControl()
+        {
+            if (_proxyForm != null)
+            {
+                pageProxy.Controls.Remove(_proxyForm);
+                _proxyForm.Dispose();
+                _proxyForm = null;
+            }
+            _proxyForm = new ProxySettingsForm(true);
+            _proxyForm.TopLevel = false;
+            _proxyForm.FormBorderStyle = FormBorderStyle.None;
+            _proxyForm.StartPosition = FormStartPosition.Manual;
+            _proxyForm.ShowInTaskbar = false;
+            _proxyForm.Dock = DockStyle.Fill;
+            pageProxy.Controls.Add(_proxyForm);
+            _proxyForm.Show();
         }
 
         private void btnFeatureAdvanced_Click(object sender, EventArgs e)
         {
             btnProxy_Click(sender, e);
+        }
+
+        private void WireClick(Control control, EventHandler handler)
+        {
+            control.Cursor = Cursors.Hand;
+            control.Click += handler;
+            foreach (Control child in control.Controls)
+            {
+                child.Cursor = Cursors.Hand;
+                child.Click += handler;
+            }
+        }
+
+        private void WireDashboardClicks()
+        {
+            WireClick(cardMetricHotspot, navConfig_Click);
+            WireClick(cardMetricProxy, navProxy_Click);
+            WireClick(cardMetricMonitor, navMonitor_Click);
+            WireClick(cardMetricClients, navMonitor_Click);
+            WireClick(cardMetricIssues, navFeatures_Click);
+            WireClick(lblAlerts, navFeatures_Click);
+            WireClick(cardState, navFeatures_Click);
         }
 
         private void ShowPage(Panel page, Button active, string title, string subtitle)
@@ -576,10 +680,11 @@ namespace WifiHotspot
             pageConfig.Visible = page == pageConfig;
             pageFeatures.Visible = page == pageFeatures;
             pageMonitor.Visible = page == pageMonitor;
+            pageProxy.Visible = page == pageProxy;
             page.BringToFront();
             lblHeaderTitle.Text = title;
             lblHeaderSubtitle.Text = subtitle;
-            Button[] navButtons = { navDashboard, navConfig, navFeatures, navMonitor, btnSideProxy };
+            Button[] navButtons = { navDashboard, navConfig, navFeatures, navMonitor, navProxy };
             foreach (Button button in navButtons)
             {
                 bool selected = button == active;
@@ -805,7 +910,11 @@ namespace WifiHotspot
             int clientCount = snapshot.Clients != null ? snapshot.Clients.Count : 0;
             lblHeroTitle.Text = running ? "热点运行中" : effective == HotspotStatus.Stopped ? "热点已停止" : "热点状态异常";
             lblHeroTitle.ForeColor = running ? Color.FromArgb(22, 101, 52) : effective == HotspotStatus.Stopped ? Color.FromArgb(180, 83, 9) : Color.FromArgb(153, 27, 27);
-            lblHeroStatus.Text = "状态: " + snapshot.Detail + "\n会话: " + HotspotTiming.StatusText + "    管理员权限: " + (snapshot.Admin ? "已获取" : "缺失");
+            lblHeroStatus.Text = "状态: " + snapshot.Detail
+                + "\nSSID: " + (string.IsNullOrWhiteSpace(txtSsid.Text) ? "—" : txtSsid.Text)
+                + "    拓扑: " + TopologyText()
+                + "    会话: " + HotspotTiming.StatusText
+                + "    管理员权限: " + (snapshot.Admin ? "已获取" : "缺失");
 
             SetMetric(lblMetricHotspot, running ? "运行中" : effective == HotspotStatus.Stopped ? "已停止" : "异常",
                 running ? FeatureHealth.Ok : effective == HotspotStatus.Stopped ? FeatureHealth.Warning : FeatureHealth.Error);
@@ -818,10 +927,15 @@ namespace WifiHotspot
             SetMetric(lblMetricClients, running ? clientCount.ToString() : "—", running ? FeatureHealth.Info : FeatureHealth.Disabled);
             SetMetric(lblMetricIssues, issues.Count.ToString(), issues.Count == 0 ? FeatureHealth.Ok : FeatureHealth.Warning);
 
-            lblSessionInfo.Text = string.Format("SSID: {0}\n拓扑: {1}\n线程: {2}\n刷新: 后台缓存",
-                string.IsNullOrWhiteSpace(txtSsid.Text) ? "—" : txtSsid.Text,
-                TopologyText(),
-                snapshot.Running ? "热点 / 代理 / 监控" : "待热点启动");
+            lblHeaderStatus.Text = string.Format("管理员:{0}   热点:{1}   代理:{2}   监控:{3}   刷新:{4:HH:mm:ss}",
+                snapshot.Admin ? "已获取" : "缺失",
+                running ? "运行" : effective == HotspotStatus.Stopped ? "停止" : "异常",
+                settings.Enabled ? (snapshot.ProxyRunning ? "运行" : "待启动") : "关闭",
+                monitorRunning ? "运行" : "待启动",
+                _lastStatusRefresh);
+            lblHeaderStatus.ForeColor = issues.Count == 0 ? Color.FromArgb(71, 85, 105) : Color.FromArgb(180, 83, 9);
+
+            ApplyDashboardClients(snapshot.Clients, running);
 
             lblAlerts.Text = issues.Count == 0
                 ? "未发现异常。所有已启用的功能均在预期状态；未启用的功能不计入异常。"
@@ -1122,6 +1236,7 @@ namespace WifiHotspot
         {
             if (_shuttingDown || snapshot == null || IsDisposed) return;
             _latestSnapshot = snapshot;
+            _lastStatusRefresh = DateTime.Now;
             lblStatus.ForeColor = snapshot.Color;
             if (lblStatus.Text != snapshot.Text) lblStatus.Text = snapshot.Text;
             SetHotspotButtons(snapshot.StartEnabled, snapshot.StopEnabled);

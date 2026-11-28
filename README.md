@@ -45,10 +45,11 @@
 - Captive 探针 Header 清理：HTTP 探测请求清除 `Referer`、`Origin`、`Accept*`、`Sec-Fetch-*`、`Priority`、`Upgrade-Insecure-Requests`，并把本机代理探针与 LAN/TUN 转发请求分别计数；`/status` 输出 `header_plane=local=... forward=... captive_scrub=... leak_scrub=...`，GUI 一键测试显示本机/转发两平面证据
 - 会话计时与运行时证据：GUI 显示最近热点启动耗时、停止时显示最近在线时长；代理 `/status` 输出 `runtime=uptime_seconds=... start_time=... config_reloads=... last_reload_age_seconds=...`
 - OpenWrt 运维：init 脚本改为 procd `respawn` watchdog，安装规则幂等，脚本提供 `status`/`reset-counters`，输出 nat/mangle/filter 计数器并检测 MTK HNAT/PPE 绕过风险
-- 新版控制台 UI：左侧导航栏统一进入仪表盘/热点配置/功能开关/运行监控/代理设置和诊断报告；顶部保留快捷启停。仪表盘只展示指标卡、异常汇总和会话信息，不再放置其他页面入口；用颜色区分正常/异常/待启动/未启用
-- 功能开关与健康状态：主界面直接切换代理、Header 画像、DeviceForge、网络层归一化、TUN、IPv6/Portal/出站封堵、TTL/DNS 监控；每项功能显示运行中/已启用/待启动/未运行/缺少配置等状态，异常项汇总到仪表盘“需要处理”
+- 新版控制台 UI：左侧导航栏只放页面入口（仪表盘/热点配置/功能开关/运行监控/代理设置）；顶栏缩为全局状态条；诊断报告作为仪表盘操作，不再占用侧边栏
+- 仪表盘：提供启动/停止/刷新/诊断操作，指标卡可点击跳转到对应页面，异常与功能状态可点击跳到功能开关，并显示实时设备预览和最近刷新时间
+- 功能开关与健康状态：功能开关页直接切换代理、Header 画像、DeviceForge、网络层归一化、TUN、IPv6/Portal/出站封堵、TTL/DNS 监控；每项功能显示运行中/已启用/待启动/未运行/缺少配置等状态，异常项汇总到仪表盘“需要处理”
 - 运行监控：连接设备列表、探针日志尾部、详细状态与管理员权限集中展示，后台轮询避免阻塞 UI
-- UI 响应优化：状态检测（支持检测、代理/网络层/监控/防护状态、配置读取）、客户端列表和网卡枚举统一移到后台线程，页面切换只渲染缓存结果；探针日志按批追加并限制为 300 行，避免每次逐行解析 TextBox；设置窗口与诊断窗口构建时批量布局，减少启动/打开时的重排重绘
+- UI 响应优化：状态检测（支持检测、代理/网络层/监控/防护状态、配置读取）、客户端列表和网卡枚举统一移到后台线程，页面切换只渲染缓存结果；探针日志按批追加并限制为 300 行，避免每次逐行解析 TextBox；诊断报告生成移到后台线程
 - 关闭/停止时统一同步清理：先停止热点与 ICS，再停止代理进程、IPv6/Portal/出站 WinDivert 模块、TTL/DNS 监控、网络层归一化和计时，确保退出后不残留 `hotspot-proxy.exe` 或 WinDivert 句柄
 - 自动配置 ICS（Internet Connection Sharing）网络共享
 - 可自定义 SSID、密码（8-63 位 WPA2）

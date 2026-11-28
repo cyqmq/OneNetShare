@@ -69,9 +69,15 @@ namespace WifiHotspot
         private long _probeLogOffset;
         private int _probeLineCount;
         private readonly Label lblResult;
+        private readonly bool _embedded;
 
-        public ProxySettingsForm()
+        public ProxySettingsForm() : this(false)
         {
+        }
+
+        public ProxySettingsForm(bool embedded)
+        {
+            _embedded = embedded;
             _configPath = ProxyConfigManager.DefaultConfigPath;
             ProxySettings settings = ProxyConfigManager.Load(_configPath);
             SuspendLayout();
@@ -324,6 +330,7 @@ namespace WifiHotspot
             var panel = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 48, FlowDirection = FlowDirection.RightToLeft, WrapContents = false, Padding = new Padding(8, 8, 8, 8) };
             panel.SuspendLayout();
             var btnClose = NewButton("关闭");
+            btnClose.Visible = !_embedded;
             btnClose.Click += delegate { Close(); };
             var btnOpen = NewButton("打开配置文件");
             btnOpen.Click += OpenConfig;

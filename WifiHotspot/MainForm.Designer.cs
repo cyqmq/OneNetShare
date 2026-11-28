@@ -23,19 +23,18 @@ namespace WifiHotspot
             this.navConfig = new System.Windows.Forms.Button();
             this.navFeatures = new System.Windows.Forms.Button();
             this.navMonitor = new System.Windows.Forms.Button();
-            this.btnSideProxy = new System.Windows.Forms.Button();
+            this.navProxy = new System.Windows.Forms.Button();
             this.lblSidebarStatus = new System.Windows.Forms.Label();
-            this.btnSideDiagnosis = new System.Windows.Forms.Button();
             this.header = new System.Windows.Forms.Panel();
             this.lblHeaderTitle = new System.Windows.Forms.Label();
             this.lblHeaderSubtitle = new System.Windows.Forms.Label();
-            this.btnQuickStart = new System.Windows.Forms.Button();
-            this.btnQuickStop = new System.Windows.Forms.Button();
+            this.lblHeaderStatus = new System.Windows.Forms.Label();
             this.contentHost = new System.Windows.Forms.Panel();
             this.pageDashboard = new System.Windows.Forms.Panel();
             this.pageConfig = new System.Windows.Forms.Panel();
             this.pageFeatures = new System.Windows.Forms.Panel();
             this.pageMonitor = new System.Windows.Forms.Panel();
+            this.pageProxy = new System.Windows.Forms.Panel();
             this.lblHeroTitle = new System.Windows.Forms.Label();
             this.lblHeroStatus = new System.Windows.Forms.Label();
             this.lblMetricHotspot = new System.Windows.Forms.Label();
@@ -50,7 +49,21 @@ namespace WifiHotspot
             this.lblDashGuards = new System.Windows.Forms.Label();
             this.lblDashHeader = new System.Windows.Forms.Label();
             this.lblDashTun = new System.Windows.Forms.Label();
-            this.lblSessionInfo = new System.Windows.Forms.Label();
+            this.btnDashboardStart = new System.Windows.Forms.Button();
+            this.btnDashboardStop = new System.Windows.Forms.Button();
+            this.btnDashboardRefresh = new System.Windows.Forms.Button();
+            this.btnDashboardDiagnosis = new System.Windows.Forms.Button();
+            this.btnAlertJump = new System.Windows.Forms.Button();
+            this.btnStateJump = new System.Windows.Forms.Button();
+            this.lstDashboardClients = new System.Windows.Forms.ListBox();
+            this.btnDashboardViewClients = new System.Windows.Forms.Button();
+            this.cardMetricHotspot = new System.Windows.Forms.Panel();
+            this.cardMetricProxy = new System.Windows.Forms.Panel();
+            this.cardMetricMonitor = new System.Windows.Forms.Panel();
+            this.cardMetricClients = new System.Windows.Forms.Panel();
+            this.cardMetricIssues = new System.Windows.Forms.Panel();
+            this.cardAlert = new System.Windows.Forms.Panel();
+            this.cardState = new System.Windows.Forms.Panel();
             this.grpSettings = new System.Windows.Forms.Panel();
             this.lblTopology = new System.Windows.Forms.Label();
             this.cmbTopology = new System.Windows.Forms.ComboBox();
@@ -110,9 +123,8 @@ namespace WifiHotspot
             this.sidebar.Controls.Add(this.navConfig);
             this.sidebar.Controls.Add(this.navFeatures);
             this.sidebar.Controls.Add(this.navMonitor);
-            this.sidebar.Controls.Add(this.btnSideProxy);
+            this.sidebar.Controls.Add(this.navProxy);
             this.sidebar.Controls.Add(this.lblSidebarStatus);
-            this.sidebar.Controls.Add(this.btnSideDiagnosis);
             this.sidebar.Dock = System.Windows.Forms.DockStyle.Left;
             this.sidebar.Location = new System.Drawing.Point(0, 0);
             this.sidebar.Name = "sidebar";
@@ -140,7 +152,7 @@ namespace WifiHotspot
             this.navConfig = NewSideButton("热点配置", 162, new System.EventHandler(this.navConfig_Click));
             this.navFeatures = NewSideButton("功能开关", 214, new System.EventHandler(this.navFeatures_Click));
             this.navMonitor = NewSideButton("运行监控", 266, new System.EventHandler(this.navMonitor_Click));
-            this.btnSideProxy = NewSideButton("代理设置", 318, new System.EventHandler(this.btnSideProxy_Click));
+            this.navProxy = NewSideButton("代理设置", 318, new System.EventHandler(this.navProxy_Click));
 
             this.lblSidebarStatus.BackColor = System.Drawing.Color.FromArgb(30, 41, 59);
             this.lblSidebarStatus.Font = new System.Drawing.Font("Microsoft YaHei", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
@@ -152,49 +164,53 @@ namespace WifiHotspot
             this.lblSidebarStatus.TabIndex = 5;
             this.lblSidebarStatus.Text = "系统状态\n正在检测...";
 
-            this.btnSideDiagnosis = NewSecondaryButton("打开诊断报告", 14, 746, 182, 36);
-            this.btnSideDiagnosis.Click += new System.EventHandler(this.btnSideDiagnosis_Click);
-
             this.header.BackColor = System.Drawing.Color.White;
             this.header.Controls.Add(this.lblHeaderTitle);
             this.header.Controls.Add(this.lblHeaderSubtitle);
-            this.header.Controls.Add(this.btnQuickStart);
-            this.header.Controls.Add(this.btnQuickStop);
+            this.header.Controls.Add(this.lblHeaderStatus);
             this.header.Dock = System.Windows.Forms.DockStyle.Top;
             this.header.Location = new System.Drawing.Point(210, 0);
             this.header.Name = "header";
-            this.header.Size = new System.Drawing.Size(1110, 74);
+            this.header.Size = new System.Drawing.Size(1110, 44);
             this.header.TabIndex = 1;
 
             this.lblHeaderTitle.AutoSize = true;
-            this.lblHeaderTitle.Font = new System.Drawing.Font("Microsoft YaHei", 16F, System.Drawing.FontStyle.Bold);
+            this.lblHeaderTitle.Font = new System.Drawing.Font("Microsoft YaHei", 12F, System.Drawing.FontStyle.Bold);
             this.lblHeaderTitle.ForeColor = System.Drawing.Color.FromArgb(15, 23, 42);
-            this.lblHeaderTitle.Location = new System.Drawing.Point(24, 12);
+            this.lblHeaderTitle.Location = new System.Drawing.Point(24, 11);
             this.lblHeaderTitle.Name = "lblHeaderTitle";
-            this.lblHeaderTitle.Size = new System.Drawing.Size(100, 32);
+            this.lblHeaderTitle.Size = new System.Drawing.Size(76, 22);
             this.lblHeaderTitle.TabIndex = 0;
             this.lblHeaderTitle.Text = "仪表盘";
 
             this.lblHeaderSubtitle.AutoSize = true;
             this.lblHeaderSubtitle.ForeColor = System.Drawing.Color.FromArgb(100, 116, 139);
-            this.lblHeaderSubtitle.Location = new System.Drawing.Point(26, 44);
+            this.lblHeaderSubtitle.Location = new System.Drawing.Point(116, 14);
             this.lblHeaderSubtitle.Name = "lblHeaderSubtitle";
             this.lblHeaderSubtitle.Size = new System.Drawing.Size(400, 17);
             this.lblHeaderSubtitle.TabIndex = 1;
             this.lblHeaderSubtitle.Text = "一眼查看热点、代理、监控和异常";
 
-            this.btnQuickStart = NewPrimaryButton("启动热点", 830, 18, 126, 38);
-            this.btnQuickStart.Click += new System.EventHandler(this.btnStart_Click);
-            this.btnQuickStop = NewDangerButton("停止热点", 966, 18, 126, 38);
-            this.btnQuickStop.Click += new System.EventHandler(this.btnStop_Click);
+            this.lblHeaderStatus.AutoSize = true;
+            this.lblHeaderStatus.Cursor = System.Windows.Forms.Cursors.Hand;
+            this.lblHeaderStatus.Font = new System.Drawing.Font("Microsoft YaHei", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
+            this.lblHeaderStatus.ForeColor = System.Drawing.Color.FromArgb(71, 85, 105);
+            this.lblHeaderStatus.Location = new System.Drawing.Point(640, 14);
+            this.lblHeaderStatus.Name = "lblHeaderStatus";
+            this.lblHeaderStatus.Size = new System.Drawing.Size(440, 17);
+            this.lblHeaderStatus.TabIndex = 2;
+            this.lblHeaderStatus.Text = "状态检测中";
+            this.lblHeaderStatus.TextAlign = System.Drawing.ContentAlignment.MiddleRight;
+            this.lblHeaderStatus.Click += new System.EventHandler(this.navDashboard_Click);
 
             this.contentHost.BackColor = System.Drawing.Color.FromArgb(245, 247, 251);
             this.contentHost.Controls.Add(this.pageMonitor);
             this.contentHost.Controls.Add(this.pageFeatures);
             this.contentHost.Controls.Add(this.pageConfig);
+            this.contentHost.Controls.Add(this.pageProxy);
             this.contentHost.Controls.Add(this.pageDashboard);
             this.contentHost.Dock = System.Windows.Forms.DockStyle.Fill;
-            this.contentHost.Location = new System.Drawing.Point(210, 74);
+            this.contentHost.Location = new System.Drawing.Point(210, 44);
             this.contentHost.Name = "contentHost";
             this.contentHost.Padding = new System.Windows.Forms.Padding(20, 18, 20, 18);
             this.contentHost.TabIndex = 2;
@@ -206,6 +222,8 @@ namespace WifiHotspot
             this.pageFeatures.Visible = false;
             ConfigurePage(this.pageMonitor, "pageMonitor");
             this.pageMonitor.Visible = false;
+            ConfigurePage(this.pageProxy, "pageProxy");
+            this.pageProxy.Visible = false;
 
             this.lblHeroTitle.AutoSize = true;
             this.lblHeroTitle.Font = new System.Drawing.Font("Microsoft YaHei", 20F, System.Drawing.FontStyle.Bold);
@@ -219,55 +237,74 @@ namespace WifiHotspot
 
             this.lblHeroStatus.Font = new System.Drawing.Font("Microsoft YaHei", 10F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
             this.lblHeroStatus.ForeColor = System.Drawing.Color.FromArgb(71, 85, 105);
-            this.lblHeroStatus.Location = new System.Drawing.Point(6, 44);
+            this.lblHeroStatus.Location = new System.Drawing.Point(6, 38);
             this.lblHeroStatus.Name = "lblHeroStatus";
-            this.lblHeroStatus.Size = new System.Drawing.Size(1030, 42);
+            this.lblHeroStatus.Size = new System.Drawing.Size(1030, 46);
             this.lblHeroStatus.TabIndex = 1;
             this.lblHeroStatus.Text = "正在检测热点、代理和监控状态...";
             this.pageDashboard.Controls.Add(this.lblHeroStatus);
 
-            AddMetricCard(this.pageDashboard, 0, 100, "热点", out this.lblMetricHotspot, "启动 / 停止状态");
-            AddMetricCard(this.pageDashboard, 210, 100, "代理", out this.lblMetricProxy, "hotspot-proxy");
-            AddMetricCard(this.pageDashboard, 420, 100, "监控", out this.lblMetricMonitor, "TTL / DNS");
-            AddMetricCard(this.pageDashboard, 630, 100, "设备", out this.lblMetricClients, "已连接客户端");
-            AddMetricCard(this.pageDashboard, 840, 100, "异常", out this.lblMetricIssues, "需要关注的项目");
+            AddMetricCard(this.pageDashboard, 0, 92, "热点", out this.cardMetricHotspot, out this.lblMetricHotspot, "点击进入热点配置");
+            AddMetricCard(this.pageDashboard, 210, 92, "代理", out this.cardMetricProxy, out this.lblMetricProxy, "点击进入代理设置");
+            AddMetricCard(this.pageDashboard, 420, 92, "监控", out this.cardMetricMonitor, out this.lblMetricMonitor, "点击进入运行监控");
+            AddMetricCard(this.pageDashboard, 630, 92, "设备", out this.cardMetricClients, out this.lblMetricClients, "点击进入运行监控");
+            AddMetricCard(this.pageDashboard, 840, 92, "异常", out this.cardMetricIssues, out this.lblMetricIssues, "点击查看功能状态");
 
-            System.Windows.Forms.Panel alertCard = NewCard("需要处理", 0, 222, 680, 180);
+            this.cardAlert = NewCard("会话控制 / 需要处理", 0, 205, 620, 180);
+            this.btnDashboardStart = NewPrimaryButton("启动热点", 16, 42, 138, 36);
+            this.btnDashboardStart.Click += new System.EventHandler(this.btnStart_Click);
+            this.btnDashboardStop = NewDangerButton("停止热点", 164, 42, 138, 36);
+            this.btnDashboardStop.Click += new System.EventHandler(this.btnStop_Click);
+            this.btnDashboardRefresh = NewSecondaryButton("刷新状态", 312, 42, 138, 36);
+            this.btnDashboardRefresh.Click += new System.EventHandler(this.btnDashboardRefresh_Click);
+            this.btnDashboardDiagnosis = NewSecondaryButton("诊断报告", 460, 42, 138, 36);
+            this.btnDashboardDiagnosis.Click += new System.EventHandler(this.btnDashboardDiagnosis_Click);
             this.lblAlerts.Font = new System.Drawing.Font("Microsoft YaHei", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
             this.lblAlerts.ForeColor = System.Drawing.Color.FromArgb(51, 65, 85);
-            this.lblAlerts.Location = new System.Drawing.Point(16, 42);
+            this.lblAlerts.Location = new System.Drawing.Point(16, 88);
             this.lblAlerts.Name = "lblAlerts";
-            this.lblAlerts.Size = new System.Drawing.Size(648, 122);
+            this.lblAlerts.Size = new System.Drawing.Size(588, 60);
             this.lblAlerts.TabIndex = 0;
             this.lblAlerts.Text = "正在检查...";
-            alertCard.Controls.Add(this.lblAlerts);
-            this.pageDashboard.Controls.Add(alertCard);
+            this.btnAlertJump = NewSecondaryButton("查看功能开关", 16, 140, 140, 30);
+            this.btnAlertJump.Click += new System.EventHandler(this.navFeatures_Click);
+            this.cardAlert.Controls.Add(this.btnDashboardStart);
+            this.cardAlert.Controls.Add(this.btnDashboardStop);
+            this.cardAlert.Controls.Add(this.btnDashboardRefresh);
+            this.cardAlert.Controls.Add(this.btnDashboardDiagnosis);
+            this.cardAlert.Controls.Add(this.lblAlerts);
+            this.cardAlert.Controls.Add(this.btnAlertJump);
+            this.pageDashboard.Controls.Add(this.cardAlert);
 
-            System.Windows.Forms.Panel sessionCard = NewCard("会话信息", 692, 222, 346, 180);
-            this.lblSessionInfo.Font = new System.Drawing.Font("Microsoft YaHei", 10F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
-            this.lblSessionInfo.ForeColor = System.Drawing.Color.FromArgb(51, 65, 85);
-            this.lblSessionInfo.Location = new System.Drawing.Point(16, 44);
-            this.lblSessionInfo.Name = "lblSessionInfo";
-            this.lblSessionInfo.Size = new System.Drawing.Size(314, 116);
-            this.lblSessionInfo.TabIndex = 0;
-            this.lblSessionInfo.Text = "正在检测...";
-            sessionCard.Controls.Add(this.lblSessionInfo);
-            this.pageDashboard.Controls.Add(sessionCard);
+            System.Windows.Forms.Panel deviceCard = NewCard("实时设备", 636, 205, 402, 180);
+            this.lstDashboardClients.FormattingEnabled = true;
+            this.lstDashboardClients.Location = new System.Drawing.Point(16, 42);
+            this.lstDashboardClients.Name = "lstDashboardClients";
+            this.lstDashboardClients.Size = new System.Drawing.Size(370, 94);
+            this.lstDashboardClients.TabIndex = 0;
+            this.btnDashboardViewClients = NewSecondaryButton("查看全部设备", 16, 140, 140, 30);
+            this.btnDashboardViewClients.Click += new System.EventHandler(this.navMonitor_Click);
+            deviceCard.Controls.Add(this.lstDashboardClients);
+            deviceCard.Controls.Add(this.btnDashboardViewClients);
+            this.pageDashboard.Controls.Add(deviceCard);
 
-            System.Windows.Forms.Panel stateCard = NewCard("功能状态总览", 0, 418, 1038, 250);
-            this.lblDashProxy = NewStateLabel(18, 48);
-            this.lblDashNetwork = NewStateLabel(18, 82);
-            this.lblDashMonitor = NewStateLabel(18, 116);
-            this.lblDashGuards = NewStateLabel(18, 150);
-            this.lblDashHeader = NewStateLabel(18, 184);
-            this.lblDashTun = NewStateLabel(540, 48);
-            stateCard.Controls.Add(this.lblDashProxy);
-            stateCard.Controls.Add(this.lblDashNetwork);
-            stateCard.Controls.Add(this.lblDashMonitor);
-            stateCard.Controls.Add(this.lblDashGuards);
-            stateCard.Controls.Add(this.lblDashHeader);
-            stateCard.Controls.Add(this.lblDashTun);
-            this.pageDashboard.Controls.Add(stateCard);
+            this.cardState = NewCard("功能状态总览（点击管理）", 0, 397, 1038, 270);
+            this.btnStateJump = NewSecondaryButton("管理功能", 858, 12, 160, 30);
+            this.btnStateJump.Click += new System.EventHandler(this.navFeatures_Click);
+            this.lblDashProxy = NewStateLabel(18, 52, 490);
+            this.lblDashNetwork = NewStateLabel(18, 88, 490);
+            this.lblDashMonitor = NewStateLabel(18, 124, 490);
+            this.lblDashGuards = NewStateLabel(18, 160, 490);
+            this.lblDashHeader = NewStateLabel(18, 196, 490);
+            this.lblDashTun = NewStateLabel(530, 52, 490);
+            this.cardState.Controls.Add(this.btnStateJump);
+            this.cardState.Controls.Add(this.lblDashProxy);
+            this.cardState.Controls.Add(this.lblDashNetwork);
+            this.cardState.Controls.Add(this.lblDashMonitor);
+            this.cardState.Controls.Add(this.lblDashGuards);
+            this.cardState.Controls.Add(this.lblDashHeader);
+            this.cardState.Controls.Add(this.lblDashTun);
+            this.pageDashboard.Controls.Add(this.cardState);
 
             this.lblFooter.AutoSize = true;
             this.lblFooter.ForeColor = System.Drawing.Color.FromArgb(148, 163, 184);
@@ -546,9 +583,9 @@ namespace WifiHotspot
             return card;
         }
 
-        private static void AddMetricCard(System.Windows.Forms.Control parent, int x, int y, string title, out System.Windows.Forms.Label value, string hint)
+        private static void AddMetricCard(System.Windows.Forms.Control parent, int x, int y, string title, out System.Windows.Forms.Panel card, out System.Windows.Forms.Label value, string hint)
         {
-            var card = NewCard(title, x, y, 198, 105);
+            card = NewCard(title, x, y, 198, 105);
             value = new System.Windows.Forms.Label();
             value.AutoSize = true;
             value.Font = new System.Drawing.Font("Microsoft YaHei", 18F, System.Drawing.FontStyle.Bold);
@@ -565,13 +602,13 @@ namespace WifiHotspot
             parent.Controls.Add(card);
         }
 
-        private static System.Windows.Forms.Label NewStateLabel(int x, int y)
+        private static System.Windows.Forms.Label NewStateLabel(int x, int y, int width = 490)
         {
             var label = new System.Windows.Forms.Label();
             label.Font = new System.Drawing.Font("Microsoft YaHei", 10F, System.Drawing.FontStyle.Bold);
             label.Location = new System.Drawing.Point(x, y);
             label.Name = "state" + y;
-            label.Size = new System.Drawing.Size(470, 26);
+            label.Size = new System.Drawing.Size(width, 26);
             label.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
             label.Text = "检测中";
             return label;
@@ -660,19 +697,18 @@ namespace WifiHotspot
         private System.Windows.Forms.Button navConfig;
         private System.Windows.Forms.Button navFeatures;
         private System.Windows.Forms.Button navMonitor;
-        private System.Windows.Forms.Button btnSideProxy;
+        private System.Windows.Forms.Button navProxy;
         private System.Windows.Forms.Label lblSidebarStatus;
-        private System.Windows.Forms.Button btnSideDiagnosis;
         private System.Windows.Forms.Panel header;
         private System.Windows.Forms.Label lblHeaderTitle;
         private System.Windows.Forms.Label lblHeaderSubtitle;
-        private System.Windows.Forms.Button btnQuickStart;
-        private System.Windows.Forms.Button btnQuickStop;
+        private System.Windows.Forms.Label lblHeaderStatus;
         private System.Windows.Forms.Panel contentHost;
         private System.Windows.Forms.Panel pageDashboard;
         private System.Windows.Forms.Panel pageConfig;
         private System.Windows.Forms.Panel pageFeatures;
         private System.Windows.Forms.Panel pageMonitor;
+        private System.Windows.Forms.Panel pageProxy;
         private System.Windows.Forms.Label lblHeroTitle;
         private System.Windows.Forms.Label lblHeroStatus;
         private System.Windows.Forms.Label lblMetricHotspot;
@@ -680,6 +716,21 @@ namespace WifiHotspot
         private System.Windows.Forms.Label lblMetricMonitor;
         private System.Windows.Forms.Label lblMetricClients;
         private System.Windows.Forms.Label lblMetricIssues;
+        private System.Windows.Forms.Panel cardMetricHotspot;
+        private System.Windows.Forms.Panel cardMetricProxy;
+        private System.Windows.Forms.Panel cardMetricMonitor;
+        private System.Windows.Forms.Panel cardMetricClients;
+        private System.Windows.Forms.Panel cardMetricIssues;
+        private System.Windows.Forms.Panel cardAlert;
+        private System.Windows.Forms.Panel cardState;
+        private System.Windows.Forms.Button btnDashboardStart;
+        private System.Windows.Forms.Button btnDashboardStop;
+        private System.Windows.Forms.Button btnDashboardRefresh;
+        private System.Windows.Forms.Button btnDashboardDiagnosis;
+        private System.Windows.Forms.Button btnAlertJump;
+        private System.Windows.Forms.Button btnStateJump;
+        private System.Windows.Forms.ListBox lstDashboardClients;
+        private System.Windows.Forms.Button btnDashboardViewClients;
         private System.Windows.Forms.Label lblAlerts;
         private System.Windows.Forms.Label lblDashProxy;
         private System.Windows.Forms.Label lblDashNetwork;
@@ -687,7 +738,6 @@ namespace WifiHotspot
         private System.Windows.Forms.Label lblDashGuards;
         private System.Windows.Forms.Label lblDashHeader;
         private System.Windows.Forms.Label lblDashTun;
-        private System.Windows.Forms.Label lblSessionInfo;
         private System.Windows.Forms.Panel grpSettings;
         private System.Windows.Forms.Label lblTopology;
         private System.Windows.Forms.ComboBox cmbTopology;
