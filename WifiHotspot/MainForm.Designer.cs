@@ -19,11 +19,6 @@ namespace WifiHotspot
             this.sidebar = new System.Windows.Forms.Panel();
             this.lblBrand = new System.Windows.Forms.Label();
             this.lblBrandSub = new System.Windows.Forms.Label();
-            this.navDashboard = new System.Windows.Forms.Button();
-            this.navConfig = new System.Windows.Forms.Button();
-            this.navFeatures = new System.Windows.Forms.Button();
-            this.navMonitor = new System.Windows.Forms.Button();
-            this.navProxy = new System.Windows.Forms.Button();
             this.lblSidebarStatus = new System.Windows.Forms.Label();
             this.header = new System.Windows.Forms.Panel();
             this.lblHeaderTitle = new System.Windows.Forms.Label();
@@ -116,6 +111,12 @@ namespace WifiHotspot
             this.timerMonitor = new System.Windows.Forms.Timer(this.components);
             this.SuspendLayout();
 
+            this.navDashboard = NewSideButton("仪表盘", 110, new System.EventHandler(this.navDashboard_Click));
+            this.navConfig = NewSideButton("热点配置", 162, new System.EventHandler(this.navConfig_Click));
+            this.navFeatures = NewSideButton("功能开关", 214, new System.EventHandler(this.navFeatures_Click));
+            this.navMonitor = NewSideButton("运行监控", 266, new System.EventHandler(this.navMonitor_Click));
+            this.navProxy = NewSideButton("代理设置", 318, new System.EventHandler(this.navProxy_Click));
+
             this.sidebar.BackColor = System.Drawing.Color.FromArgb(15, 23, 42);
             this.sidebar.Controls.Add(this.lblBrand);
             this.sidebar.Controls.Add(this.lblBrandSub);
@@ -147,12 +148,6 @@ namespace WifiHotspot
             this.lblBrandSub.Size = new System.Drawing.Size(150, 17);
             this.lblBrandSub.TabIndex = 1;
             this.lblBrandSub.Text = "热点 / 代理控制台";
-
-            this.navDashboard = NewSideButton("仪表盘", 110, new System.EventHandler(this.navDashboard_Click));
-            this.navConfig = NewSideButton("热点配置", 162, new System.EventHandler(this.navConfig_Click));
-            this.navFeatures = NewSideButton("功能开关", 214, new System.EventHandler(this.navFeatures_Click));
-            this.navMonitor = NewSideButton("运行监控", 266, new System.EventHandler(this.navMonitor_Click));
-            this.navProxy = NewSideButton("代理设置", 318, new System.EventHandler(this.navProxy_Click));
 
             this.lblSidebarStatus.BackColor = System.Drawing.Color.FromArgb(30, 41, 59);
             this.lblSidebarStatus.Font = new System.Drawing.Font("Microsoft YaHei", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
