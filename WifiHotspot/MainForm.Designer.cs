@@ -30,6 +30,11 @@ namespace WifiHotspot
             this.pageFeatures = new System.Windows.Forms.Panel();
             this.pageMonitor = new System.Windows.Forms.Panel();
             this.pageProxy = new System.Windows.Forms.Panel();
+            this.pageEnvironment = new System.Windows.Forms.Panel();
+            this.lblEnvironmentSummary = new System.Windows.Forms.Label();
+            this.txtEnvironmentReport = new System.Windows.Forms.TextBox();
+            this.btnEnvironmentRefresh = new System.Windows.Forms.Button();
+            this.btnEnvironmentDiagnosis = new System.Windows.Forms.Button();
             this.lblHeroTitle = new System.Windows.Forms.Label();
             this.lblHeroStatus = new System.Windows.Forms.Label();
             this.lblMetricHotspot = new System.Windows.Forms.Label();
@@ -116,6 +121,7 @@ namespace WifiHotspot
             this.navFeatures = NewSideButton("功能开关", 214, new System.EventHandler(this.navFeatures_Click));
             this.navMonitor = NewSideButton("运行监控", 266, new System.EventHandler(this.navMonitor_Click));
             this.navProxy = NewSideButton("代理设置", 318, new System.EventHandler(this.navProxy_Click));
+            this.navEnvironment = NewSideButton("环境检测", 370, new System.EventHandler(this.navEnvironment_Click));
 
             this.sidebar.BackColor = System.Drawing.Color.FromArgb(15, 23, 42);
             this.sidebar.Controls.Add(this.lblBrand);
@@ -125,6 +131,7 @@ namespace WifiHotspot
             this.sidebar.Controls.Add(this.navFeatures);
             this.sidebar.Controls.Add(this.navMonitor);
             this.sidebar.Controls.Add(this.navProxy);
+            this.sidebar.Controls.Add(this.navEnvironment);
             this.sidebar.Controls.Add(this.lblSidebarStatus);
             this.sidebar.Dock = System.Windows.Forms.DockStyle.Left;
             this.sidebar.Location = new System.Drawing.Point(0, 0);
@@ -203,6 +210,7 @@ namespace WifiHotspot
             this.contentHost.Controls.Add(this.pageFeatures);
             this.contentHost.Controls.Add(this.pageConfig);
             this.contentHost.Controls.Add(this.pageProxy);
+            this.contentHost.Controls.Add(this.pageEnvironment);
             this.contentHost.Controls.Add(this.pageDashboard);
             this.contentHost.Dock = System.Windows.Forms.DockStyle.Fill;
             this.contentHost.Location = new System.Drawing.Point(210, 44);
@@ -219,6 +227,35 @@ namespace WifiHotspot
             this.pageMonitor.Visible = false;
             ConfigurePage(this.pageProxy, "pageProxy");
             this.pageProxy.Visible = false;
+            ConfigurePage(this.pageEnvironment, "pageEnvironment");
+            this.pageEnvironment.Visible = false;
+
+            this.lblEnvironmentSummary.Font = new System.Drawing.Font("Microsoft YaHei", 10F, System.Drawing.FontStyle.Bold);
+            this.lblEnvironmentSummary.ForeColor = System.Drawing.Color.FromArgb(51, 65, 85);
+            this.lblEnvironmentSummary.Location = new System.Drawing.Point(6, 6);
+            this.lblEnvironmentSummary.Name = "lblEnvironmentSummary";
+            this.lblEnvironmentSummary.Size = new System.Drawing.Size(650, 60);
+            this.lblEnvironmentSummary.Text = "点击“重新检测”检查权限、服务、驱动支持与运行组件。";
+            this.pageEnvironment.Controls.Add(this.lblEnvironmentSummary);
+
+            this.btnEnvironmentDiagnosis = NewSecondaryButton("完整诊断报告", 690, 10, 170, 36);
+            this.btnEnvironmentDiagnosis.Click += new System.EventHandler(this.btnEnvironmentDiagnosis_Click);
+            this.pageEnvironment.Controls.Add(this.btnEnvironmentDiagnosis);
+
+            this.btnEnvironmentRefresh = NewPrimaryButton("重新检测", 880, 10, 150, 36);
+            this.btnEnvironmentRefresh.Click += new System.EventHandler(this.btnEnvironmentRefresh_Click);
+            this.pageEnvironment.Controls.Add(this.btnEnvironmentRefresh);
+
+            this.txtEnvironmentReport.Location = new System.Drawing.Point(6, 78);
+            this.txtEnvironmentReport.Multiline = true;
+            this.txtEnvironmentReport.Name = "txtEnvironmentReport";
+            this.txtEnvironmentReport.ReadOnly = true;
+            this.txtEnvironmentReport.ScrollBars = System.Windows.Forms.ScrollBars.Both;
+            this.txtEnvironmentReport.Size = new System.Drawing.Size(1024, 560);
+            this.txtEnvironmentReport.TabIndex = 0;
+            this.txtEnvironmentReport.Text = "尚未检测。";
+            this.txtEnvironmentReport.WordWrap = false;
+            this.pageEnvironment.Controls.Add(this.txtEnvironmentReport);
 
             this.lblHeroTitle.AutoSize = true;
             this.lblHeroTitle.Font = new System.Drawing.Font("Microsoft YaHei", 20F, System.Drawing.FontStyle.Bold);
@@ -693,6 +730,7 @@ namespace WifiHotspot
         private System.Windows.Forms.Button navFeatures;
         private System.Windows.Forms.Button navMonitor;
         private System.Windows.Forms.Button navProxy;
+        private System.Windows.Forms.Button navEnvironment;
         private System.Windows.Forms.Label lblSidebarStatus;
         private System.Windows.Forms.Panel header;
         private System.Windows.Forms.Label lblHeaderTitle;
@@ -704,6 +742,11 @@ namespace WifiHotspot
         private System.Windows.Forms.Panel pageFeatures;
         private System.Windows.Forms.Panel pageMonitor;
         private System.Windows.Forms.Panel pageProxy;
+        private System.Windows.Forms.Panel pageEnvironment;
+        private System.Windows.Forms.Label lblEnvironmentSummary;
+        private System.Windows.Forms.TextBox txtEnvironmentReport;
+        private System.Windows.Forms.Button btnEnvironmentRefresh;
+        private System.Windows.Forms.Button btnEnvironmentDiagnosis;
         private System.Windows.Forms.Label lblHeroTitle;
         private System.Windows.Forms.Label lblHeroStatus;
         private System.Windows.Forms.Label lblMetricHotspot;

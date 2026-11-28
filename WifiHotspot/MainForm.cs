@@ -28,10 +28,12 @@ namespace WifiHotspot
         private int _adaptersBusy;
         private int _diagnosisBusy;
         private int _hotspotOperationBusy;
+        private int _environmentBusy;
         private bool _applyingAdapters;
         private bool _shuttingDown;
         private StatusSnapshot _latestSnapshot;
         private ProxySettingsForm _proxyForm;
+        private HotspotDiagnosis _environmentDiagnosis;
         private DateTime _lastStatusRefresh;
 
         private enum FeatureHealth
@@ -719,6 +721,142 @@ namespace WifiHotspot
             ShowProxyPage();
         }
 
+        private void navEnvironment_Click(object sender, EventArgs e)
+        {
+            ShowPage(pageEnvironment, navEnvironment, "环境检测", "检查权限、服务、驱动支持与运行组件");
+            RefreshEnvironmentPage();
+        }
+
+        private void btnEnvironmentRefresh_Click(object sender, EventArgs e)
+        {
+            RefreshEnvironmentPage();
+        }
+
+        private void btnEnvironmentDiagnosis_Click(object sender, EventArgs e)
+        {
+            if (_environmentDiagnosis == null)
+                RefreshEnvironmentPage();
+            else
+                ShowHotspotDiagnosis(_environmentDiagnosis);
+        }
+
+        private void RefreshEnvironmentPage()
+        {
+            if (_shuttingDown || IsDisposed) return;
+            if (Interlocked.Exchange(ref _environmentBusy, 1) != 0) return;
+
+            lblEnvironmentSummary.Text = "正在检测权限、服务、驱动支持与运行组件...";
+            btnEnvironmentRefresh.Enabled = false;
+            string ssid = txtSsid.Text;
+            string password = txtPassword.Text;
+            string summary = _latestSnapshot != null ? _latestSnapshot.Text : "尚未获取热点状态。";
+
+            ThreadPool.QueueUserWorkItem(delegate(object state)
+            {
+                HotspotDiagnosis diagnosis = null;
+                HotspotResult support = null;
+                string error = null;
+                try
+                {
+                    diagnosis = _manager.Diagnose(summary, null, ssid, password);
+                }
+                catch (Exception ex)
+                {
+                    error = "环境检测失败: " + ex.Message;
+                }
+                try
+                {
+                    support = _manager.CheckSupport();
+                }
+                catch (Exception ex)
+                {
+                    error = (error ?? string.Empty) + "\n承载网络支持检测失败: " + ex.Message;
+                }
+
+                InvokeUI(new Action(() =>
+                {
+                    try
+                    {
+                        if (!string.IsNullOrEmpty(error))
+                        {
+                            _environmentDiagnosis = null;
+                            txtEnvironmentReport.Text = error;
+                            lblEnvironmentSummary.Text = "环境检测失败，请重试。";
+                        }
+                        else
+                        {
+                            _environmentDiagnosis = diagnosis;
+                            txtEnvironmentReport.Text = BuildEnvironmentReport(diagnosis, support, _latestSnapshot);
+                            int count = diagnosis != null && diagnosis.Issues != null ? diagnosis.Issues.Count : 0;
+                            lblEnvironmentSummary.Text = count == 0
+                                ? "未发现环境问题。已启用功能状态正常。"
+                                : "发现 " + count + " 项环境问题，请按报告中的修改路径处理。";
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _environmentDiagnosis = null;
+                        txtEnvironmentReport.Text = "生成环境报告失败: " + ex.Message;
+                        lblEnvironmentSummary.Text = "环境检测失败，请重试。";
+                    }
+                    finally
+                    {
+                        btnEnvironmentRefresh.Enabled = true;
+                        Interlocked.Exchange(ref _environmentBusy, 0);
+                    }
+                }));
+            });
+        }
+
+        private static string BuildEnvironmentReport(HotspotDiagnosis diagnosis, HotspotResult support, StatusSnapshot snapshot)
+        {
+            var report = new StringBuilder();
+            report.AppendLine("检测时间: " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
+            report.AppendLine("管理员权限: " + (HotspotManager.IsAdministrator() ? "已获取" : "缺失，需右键程序 → 以管理员身份运行"));
+            report.AppendLine("操作系统: " + Environment.OSVersion.VersionString + (Environment.Is64BitOperatingSystem ? " / 64 位" : " / 32 位"));
+            report.AppendLine("运行进程: " + (Environment.Is64BitProcess ? "64 位" : "32 位") + " / CLR " + Environment.Version);
+            report.AppendLine();
+            report.AppendLine("— 运行状态 —");
+            report.AppendLine("热点状态: " + (snapshot == null || string.IsNullOrEmpty(snapshot.Detail) ? "尚未获取" : snapshot.Detail));
+            report.AppendLine("承载网络支持: " + (support == null ? "检测失败" : support.Success ? "可用" : "不可用") +
+                              (support == null || string.IsNullOrEmpty(support.Message) ? string.Empty : " / " + Indent(support.Message)));
+            report.AppendLine("代理进程: " + (snapshot == null || snapshot.Settings == null ? "尚未获取" : snapshot.Settings.Enabled ? (snapshot.ProxyRunning ? "运行中" : "已启用但未运行") : "已关闭"));
+            report.AppendLine("网络层归一化: " + (snapshot == null ? "尚未获取" : snapshot.NetworkRunning ? "运行中" : "未运行" + (string.IsNullOrEmpty(snapshot.NetworkMessage) ? string.Empty : " / " + snapshot.NetworkMessage)));
+            report.AppendLine("TTL/DNS 监控: " + (snapshot == null ? "尚未获取" : (snapshot.MonitorRunning ? "TTL 运行" : "TTL 未运行") + " / " + (snapshot.DnsRunning ? "DNS 运行" : "DNS 未运行")));
+            report.AppendLine("WinDivert 出站封堵: " + (snapshot == null ? "尚未获取" : snapshot.OutboundRunning ? "运行中" : "未运行"));
+            report.AppendLine();
+            report.AppendLine("— 环境问题 —");
+
+            if (diagnosis == null || diagnosis.Issues == null || diagnosis.Issues.Count == 0)
+            {
+                report.AppendLine("未发现问题。");
+            }
+            else
+            {
+                for (int i = 0; i < diagnosis.Issues.Count; i++)
+                {
+                    HotspotIssue issue = diagnosis.Issues[i];
+                    report.AppendLine("[" + (i + 1) + "] " + issue.Title);
+                    report.AppendLine("    现象: " + Indent(issue.Detail));
+                    report.AppendLine("    修改路径: " + Indent(issue.FixPath));
+                    report.AppendLine();
+                }
+            }
+
+            if (diagnosis != null && !string.IsNullOrWhiteSpace(diagnosis.RawMessage))
+            {
+                report.AppendLine("— 原始信息 —");
+                report.AppendLine(Indent(diagnosis.RawMessage));
+            }
+            return report.ToString();
+        }
+
+        private static string Indent(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return "—";
+            return value.Replace("\r\n", "\n").Replace("\r", "\n").Replace("\n", "\n          ");
+        }
+
         private void ShowProxyPage()
         {
             ShowPage(pageProxy, navProxy, "代理设置", "高级参数、测试与诊断");
@@ -777,10 +915,11 @@ namespace WifiHotspot
             pageFeatures.Visible = page == pageFeatures;
             pageMonitor.Visible = page == pageMonitor;
             pageProxy.Visible = page == pageProxy;
+            pageEnvironment.Visible = page == pageEnvironment;
             page.BringToFront();
             lblHeaderTitle.Text = title;
             lblHeaderSubtitle.Text = subtitle;
-            Button[] navButtons = { navDashboard, navConfig, navFeatures, navMonitor, navProxy };
+            Button[] navButtons = { navDashboard, navConfig, navFeatures, navMonitor, navProxy, navEnvironment };
             foreach (Button button in navButtons)
             {
                 bool selected = button == active;
