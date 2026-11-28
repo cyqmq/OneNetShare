@@ -27,6 +27,7 @@ namespace WifiHotspot
         private int _clientsBusy;
         private int _adaptersBusy;
         private int _diagnosisBusy;
+        private int _hotspotOperationBusy;
         private bool _applyingAdapters;
         private bool _shuttingDown;
         private StatusSnapshot _latestSnapshot;
@@ -324,6 +325,12 @@ namespace WifiHotspot
         private void ShowHotspotDiagnosis(string message, IcsManager.NetworkAdapterInfo adapter, IcsManager.NetworkAdapterInfo wirelessAdapter = null)
         {
             var diagnosis = _manager.Diagnose(message, adapter, txtSsid.Text, txtPassword.Text, wirelessAdapter);
+            ShowHotspotDiagnosis(diagnosis);
+        }
+
+        private void ShowHotspotDiagnosis(HotspotDiagnosis diagnosis)
+        {
+            if (diagnosis == null) return;
             using (var form = new DiagnosisForm(diagnosis))
                 form.ShowDialog(this);
         }
@@ -331,6 +338,36 @@ namespace WifiHotspot
         private void ShowProxyDiagnosis(string message)
         {
             MessageBox.Show(this, message, "代理自动诊断", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
+
+        private void InvokeUI(Action action)
+        {
+            if (_shuttingDown || IsDisposed) return;
+            try { BeginInvoke(action); }
+            catch { }
+        }
+
+        private void RunHotspotOperation(Action operation)
+        {
+            var thread = new Thread(delegate()
+            {
+                try
+                {
+                    operation();
+                }
+                catch (Exception ex)
+                {
+                    InvokeUI(new Action(() => MessageBox.Show(this, "操作执行失败: " + ex.Message, "错误", MessageBoxButtons.OK, MessageBoxIcon.Error)));
+                }
+                finally
+                {
+                    Interlocked.Exchange(ref _hotspotOperationBusy, 0);
+                }
+            });
+            thread.IsBackground = true;
+            try { thread.SetApartmentState(ApartmentState.STA); }
+            catch { }
+            thread.Start();
         }
 
         private void RefreshClients()
@@ -427,7 +464,11 @@ namespace WifiHotspot
                 txtPassword.Focus();
                 return;
             }
+            if (Interlocked.Exchange(ref _hotspotOperationBusy, 1) != 0) return;
 
+            string ssid = txtSsid.Text;
+            string password = txtPassword.Text;
+            bool wired = IsWiredWifiMode();
             IcsManager.NetworkAdapterInfo selected = null;
             if (cmbAdapter.SelectedIndex >= 0 && cmbAdapter.SelectedIndex < _adapterSource.Count)
                 selected = _adapterSource[cmbAdapter.SelectedIndex];
@@ -440,109 +481,164 @@ namespace WifiHotspot
             lblStatus.Text = "正在启动热点，请稍候...";
             lblStatus.Refresh();
 
-            HotspotTiming.BeginStart();
-            HotspotResult result = IsWiredWifiMode()
-                ? _manager.StartWiredWifi(selected, selectedWireless, txtSsid.Text, txtPassword.Text)
-                : _manager.Start(selected, txtSsid.Text, txtPassword.Text);
-            if (result.Success)
+            RunHotspotOperation(() => StartHotspotWorker(ssid, password, wired, selected, selectedWireless));
+        }
+
+        private void StartHotspotWorker(string ssid, string password, bool wired, IcsManager.NetworkAdapterInfo selected, IcsManager.NetworkAdapterInfo selectedWireless)
+        {
+            string proxyDiagnosis = null;
+            string completionMessage = null;
+            var diagnoses = new List<HotspotDiagnosis>();
+            try
             {
-                string proxyMessage = string.Empty;
-                try
+                HotspotTiming.BeginStart();
+                HotspotResult result = wired
+                    ? _manager.StartWiredWifi(selected, selectedWireless, ssid, password)
+                    : _manager.Start(selected, ssid, password);
+                if (!result.Success)
                 {
-                    ProxySettings settings = ProxyConfigManager.Load();
-                    int hotspotIndex = IsWiredWifiMode() ? ResolveHotspotInterfaceIndex() : 0;
-                    if (settings.AutoStartProxy)
+                    HotspotTiming.EndStart(false);
+                    TryAddDiagnosis(diagnoses, result.Message, selected, ssid, password, selectedWireless);
+                }
+                else
+                {
+                    string proxyMessage = string.Empty;
+                    try
                     {
-                        proxyMessage = "\n" + ProxyProcessManager.Start(ProxyConfigManager.DefaultConfigPath);
-                        if (!ProxyProcessManager.IsRunning() && !string.IsNullOrEmpty(ProxyProcessManager.LastDiagnostic))
-                            ShowProxyDiagnosis("热点启动后代理未就绪。\n" + ProxyProcessManager.LastDiagnostic);
-                        else if (settings.TunEnabled && !ProxyProcessManager.IsRunning())
-                            ShowHotspotDiagnosis("全局 TUN 代理启动失败：\n" + proxyMessage, selected);
-                    }
-                    List<string> globalIPv6 = ProxyDiagnostics.FindHotspotGlobalIPv6();
-                    bool needIPv6Guard = settings.IPv6GuardEnabled && globalIPv6.Count > 0;
-                    if (needIPv6Guard)
-                    {
-                        string policy = "block";
-                        string guardScope = hotspotIndex > 0 ? "热点接口转发封禁" : "全局转发封禁";
-                        proxyMessage += "\n检测到热点网卡公网 IPv6 " + string.Join(", ", globalIPv6.ToArray()) + "，自动启用" + guardScope + "。";
-                        var ipv6Result = IPv6Guard.Start(policy, hotspotIndex);
-                        proxyMessage += "\n" + ipv6Result.Message;
-                        if (!ipv6Result.Success)
+                        ProxySettings settings = ProxyConfigManager.Load();
+                        int hotspotIndex = wired ? ResolveHotspotInterfaceIndex() : 0;
+                        if (settings.AutoStartProxy)
                         {
-                            string hint = ipv6Result.Message.IndexOf("1450") >= 0
-                                ? "\n\n错误码 1450 (ERROR_NO_SYSTEM_RESOURCES): 可能是系统内核资源不足，或 WinDivert 驱动状态异常。建议：重启电脑后重试；确认无其他 WinDivert/Clash/TUN 工具占用同一驱动；必要时以管理员运行 `sc stop WinDivert`、`sc delete WinDivert` 后重启。"
-                                : "";
-                            ShowHotspotDiagnosis("IPv6 转发封禁启动失败：\n" + ipv6Result.Message + hint, selected);
+                            proxyMessage = "\n" + ProxyProcessManager.Start(ProxyConfigManager.DefaultConfigPath);
+                            if (!ProxyProcessManager.IsRunning() && !string.IsNullOrEmpty(ProxyProcessManager.LastDiagnostic))
+                                proxyDiagnosis = "热点启动后代理未就绪。\n" + ProxyProcessManager.LastDiagnostic;
+                            else if (settings.TunEnabled && !ProxyProcessManager.IsRunning())
+                                TryAddDiagnosis(diagnoses, "全局 TUN 代理启动失败：\n" + proxyMessage, selected, ssid, password, selectedWireless);
                         }
-                    }
-                    else
-                    {
-                        proxyMessage += !settings.IPv6GuardEnabled
-                            ? "\nIPv6 封禁开关已关闭，未启用 IPv6 转发封禁。"
-                            : "\n未检测到热点网卡公网 IPv6（仅 ULA/Link-local），未启用 IPv6 封禁。";
-                    }
-                    if (settings.PortalBlockEnabled)
-                    {
-                        var portalResult = PortalGuard.Start(settings.PortalPrimaryIP, settings.PortalSecondaryIP, hotspotIndex);
-                        proxyMessage += "\n" + portalResult.Message;
-                        if (!portalResult.Success)
-                            ShowHotspotDiagnosis("Portal 封堵启动失败：\n" + portalResult.Message, selected);
-                    }
-                    if (settings.OutboundGuardEnabled)
-                    {
-                        if (settings.TunEnabled)
+                        List<string> globalIPv6 = ProxyDiagnostics.FindHotspotGlobalIPv6();
+                        bool needIPv6Guard = settings.IPv6GuardEnabled && globalIPv6.Count > 0;
+                        if (needIPv6Guard)
                         {
-                            proxyMessage += "\n全局 TUN 模式由代理层执行出站封堵，跳过 WinDivert 出站封堵。";
+                            string guardScope = hotspotIndex > 0 ? "热点接口转发封禁" : "全局转发封禁";
+                            proxyMessage += "\n检测到热点网卡公网 IPv6 " + string.Join(", ", globalIPv6.ToArray()) + "，自动启用" + guardScope + "。";
+                            var ipv6Result = IPv6Guard.Start("block", hotspotIndex);
+                            proxyMessage += "\n" + ipv6Result.Message;
+                            if (!ipv6Result.Success)
+                            {
+                                string hint = ipv6Result.Message.IndexOf("1450") >= 0
+                                    ? "\n\n错误码 1450 (ERROR_NO_SYSTEM_RESOURCES): 可能是系统内核资源不足，或 WinDivert 驱动状态异常。建议：重启电脑后重试；确认无其他 WinDivert/Clash/TUN 工具占用同一驱动；必要时以管理员运行 `sc stop WinDivert`、`sc delete WinDivert` 后重启。"
+                                    : "";
+                                TryAddDiagnosis(diagnoses, "IPv6 转发封禁启动失败：\n" + ipv6Result.Message + hint, selected, ssid, password, selectedWireless);
+                            }
                         }
                         else
                         {
-                            var guardResult = OutboundGuard.Start(settings, hotspotIndex);
-                            proxyMessage += "\n" + guardResult.Message;
-                            if (!guardResult.Success)
-                                ShowHotspotDiagnosis("出站封堵启动失败：\n" + guardResult.Message, selected);
+                            proxyMessage += !settings.IPv6GuardEnabled
+                                ? "\nIPv6 封禁开关已关闭，未启用 IPv6 转发封禁。"
+                                : "\n未检测到热点网卡公网 IPv6（仅 ULA/Link-local），未启用 IPv6 封禁。";
+                        }
+                        if (settings.PortalBlockEnabled)
+                        {
+                            var portalResult = PortalGuard.Start(settings.PortalPrimaryIP, settings.PortalSecondaryIP, hotspotIndex);
+                            proxyMessage += "\n" + portalResult.Message;
+                            if (!portalResult.Success)
+                                TryAddDiagnosis(diagnoses, "Portal 封堵启动失败：\n" + portalResult.Message, selected, ssid, password, selectedWireless);
+                        }
+                        if (settings.OutboundGuardEnabled)
+                        {
+                            if (settings.TunEnabled)
+                                proxyMessage += "\n全局 TUN 模式由代理层执行出站封堵，跳过 WinDivert 出站封堵。";
+                            else
+                            {
+                                var guardResult = OutboundGuard.Start(settings, hotspotIndex);
+                                proxyMessage += "\n" + guardResult.Message;
+                                if (!guardResult.Success)
+                                    TryAddDiagnosis(diagnoses, "出站封堵启动失败：\n" + guardResult.Message, selected, ssid, password, selectedWireless);
+                            }
+                        }
+                        if (settings.MonitorEnabled && (settings.MonitorTtl || settings.MonitorDns))
+                        {
+                            var monitorResult = TrafficMonitor.Shared.Start(settings);
+                            proxyMessage += "\n" + monitorResult.Message;
+                            if (!monitorResult.Success)
+                                TryAddDiagnosis(diagnoses, "核心监控启动失败：\n" + monitorResult.Message, selected, ssid, password, selectedWireless);
                         }
                     }
-                    if (settings.MonitorEnabled && (settings.MonitorTtl || settings.MonitorDns))
+                    catch (Exception ex)
                     {
-                        var monitorResult = TrafficMonitor.Shared.Start(settings);
-                        proxyMessage += "\n" + monitorResult.Message;
-                        if (!monitorResult.Success)
-                            ShowHotspotDiagnosis("核心监控启动失败：\n" + monitorResult.Message, selected);
+                        proxyMessage = "\n代理自动启动失败: " + ex.Message;
                     }
+                    HotspotTiming.EndStart(true);
+                    completionMessage = result.Message + proxyMessage + "\n" + HotspotTiming.StatusText;
                 }
-                catch (Exception ex)
-                {
-                    proxyMessage = "\n代理自动启动失败: " + ex.Message;
-                }
-                HotspotTiming.EndStart(true);
-                MessageBox.Show(result.Message + proxyMessage + "\n" + HotspotTiming.StatusText, "启动结果", MessageBoxButtons.OK, MessageBoxIcon.Information);
             }
-            else
+            catch (Exception ex)
             {
                 HotspotTiming.EndStart(false);
-                ShowHotspotDiagnosis(result.Message, selected, selectedWireless);
+                TryAddDiagnosis(diagnoses, "启动热点时发生异常: " + ex.Message, selected, ssid, password, selectedWireless);
             }
 
-            CheckSupportAndStatus();
+            InvokeUI(new Action(() =>
+            {
+                if (!string.IsNullOrEmpty(proxyDiagnosis)) ShowProxyDiagnosis(proxyDiagnosis);
+                foreach (var diagnosis in diagnoses) ShowHotspotDiagnosis(diagnosis);
+                if (!string.IsNullOrEmpty(completionMessage))
+                    MessageBox.Show(this, completionMessage, "启动结果", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                CheckSupportAndStatus();
+            }));
+        }
+
+        private void TryAddDiagnosis(List<HotspotDiagnosis> diagnoses, string message, IcsManager.NetworkAdapterInfo adapter, string ssid, string password, IcsManager.NetworkAdapterInfo wirelessAdapter)
+        {
+            try
+            {
+                var diagnosis = _manager.Diagnose(message, adapter, ssid, password, wirelessAdapter);
+                if (diagnosis != null) diagnoses.Add(diagnosis);
+            }
+            catch { }
         }
 
         private void btnStop_Click(object sender, EventArgs e)
         {
+            if (Interlocked.Exchange(ref _hotspotOperationBusy, 1) != 0) return;
+
+            string ssid = txtSsid.Text;
+            string password = txtPassword.Text;
             SetHotspotButtons(false, false);
             lblStatus.ForeColor = Color.Blue;
             lblStatus.Text = "正在停止热点...";
             lblStatus.Refresh();
 
-            string cleanup = StopRuntimeComponents(true);
-            HotspotTiming.EndSession();
-            if (cleanup.IndexOf("失败", StringComparison.OrdinalIgnoreCase) < 0)
-                MessageBox.Show(cleanup + "\n" + HotspotTiming.StatusText, "停止结果", MessageBoxButtons.OK, MessageBoxIcon.Information);
-            else
-                ShowHotspotDiagnosis(cleanup, null);
+            RunHotspotOperation(() => StopHotspotWorker(ssid, password));
+        }
 
-            lstClients.Items.Clear();
-            CheckSupportAndStatus();
+        private void StopHotspotWorker(string ssid, string password)
+        {
+            string cleanup = string.Empty;
+            string completionMessage = null;
+            HotspotDiagnosis diagnosis = null;
+            try
+            {
+                cleanup = StopRuntimeComponents(true);
+                HotspotTiming.EndSession();
+                if (cleanup.IndexOf("失败", StringComparison.OrdinalIgnoreCase) < 0)
+                    completionMessage = cleanup + "\n" + HotspotTiming.StatusText;
+                else
+                    diagnosis = _manager.Diagnose(cleanup, null, ssid, password);
+            }
+            catch (Exception ex)
+            {
+                diagnosis = _manager.Diagnose("停止热点时发生异常: " + ex.Message, null, ssid, password);
+            }
+
+            InvokeUI(new Action(() =>
+            {
+                if (diagnosis != null) ShowHotspotDiagnosis(diagnosis);
+                else if (!string.IsNullOrEmpty(completionMessage))
+                    MessageBox.Show(this, completionMessage, "停止结果", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                lstClients.Items.Clear();
+                CheckSupportAndStatus();
+            }));
         }
 
         private void btnRefresh_Click(object sender, EventArgs e)
