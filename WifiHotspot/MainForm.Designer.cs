@@ -23,6 +23,7 @@ namespace WifiHotspot
             this.navConfig = new System.Windows.Forms.Button();
             this.navFeatures = new System.Windows.Forms.Button();
             this.navMonitor = new System.Windows.Forms.Button();
+            this.btnSideProxy = new System.Windows.Forms.Button();
             this.lblSidebarStatus = new System.Windows.Forms.Label();
             this.btnSideDiagnosis = new System.Windows.Forms.Button();
             this.header = new System.Windows.Forms.Panel();
@@ -49,10 +50,7 @@ namespace WifiHotspot
             this.lblDashGuards = new System.Windows.Forms.Label();
             this.lblDashHeader = new System.Windows.Forms.Label();
             this.lblDashTun = new System.Windows.Forms.Label();
-            this.btnDashboardStart = new System.Windows.Forms.Button();
-            this.btnDashboardStop = new System.Windows.Forms.Button();
-            this.btnDashboardAdvanced = new System.Windows.Forms.Button();
-            this.btnDashboardRefresh = new System.Windows.Forms.Button();
+            this.lblSessionInfo = new System.Windows.Forms.Label();
             this.grpSettings = new System.Windows.Forms.Panel();
             this.lblTopology = new System.Windows.Forms.Label();
             this.cmbTopology = new System.Windows.Forms.ComboBox();
@@ -112,6 +110,7 @@ namespace WifiHotspot
             this.sidebar.Controls.Add(this.navConfig);
             this.sidebar.Controls.Add(this.navFeatures);
             this.sidebar.Controls.Add(this.navMonitor);
+            this.sidebar.Controls.Add(this.btnSideProxy);
             this.sidebar.Controls.Add(this.lblSidebarStatus);
             this.sidebar.Controls.Add(this.btnSideDiagnosis);
             this.sidebar.Dock = System.Windows.Forms.DockStyle.Left;
@@ -138,9 +137,10 @@ namespace WifiHotspot
             this.lblBrandSub.Text = "热点 / 代理控制台";
 
             this.navDashboard = NewSideButton("仪表盘", 110, new System.EventHandler(this.navDashboard_Click));
-            this.navConfig = NewSideButton("热点配置", 156, new System.EventHandler(this.navConfig_Click));
-            this.navFeatures = NewSideButton("功能开关", 202, new System.EventHandler(this.navFeatures_Click));
-            this.navMonitor = NewSideButton("运行监控", 248, new System.EventHandler(this.navMonitor_Click));
+            this.navConfig = NewSideButton("热点配置", 162, new System.EventHandler(this.navConfig_Click));
+            this.navFeatures = NewSideButton("功能开关", 214, new System.EventHandler(this.navFeatures_Click));
+            this.navMonitor = NewSideButton("运行监控", 266, new System.EventHandler(this.navMonitor_Click));
+            this.btnSideProxy = NewSideButton("代理设置", 318, new System.EventHandler(this.btnSideProxy_Click));
 
             this.lblSidebarStatus.BackColor = System.Drawing.Color.FromArgb(30, 41, 59);
             this.lblSidebarStatus.Font = new System.Drawing.Font("Microsoft YaHei", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
@@ -243,20 +243,16 @@ namespace WifiHotspot
             alertCard.Controls.Add(this.lblAlerts);
             this.pageDashboard.Controls.Add(alertCard);
 
-            System.Windows.Forms.Panel actionCard = NewCard("快捷操作", 692, 222, 346, 180);
-            this.btnDashboardStart = NewPrimaryButton("启动热点", 16, 44, 150, 38);
-            this.btnDashboardStart.Click += new System.EventHandler(this.btnStart_Click);
-            this.btnDashboardStop = NewDangerButton("停止热点", 178, 44, 150, 38);
-            this.btnDashboardStop.Click += new System.EventHandler(this.btnStop_Click);
-            this.btnDashboardAdvanced = NewSecondaryButton("高级代理设置", 16, 92, 312, 36);
-            this.btnDashboardAdvanced.Click += new System.EventHandler(this.btnProxy_Click);
-            this.btnDashboardRefresh = NewSecondaryButton("立即刷新状态", 16, 136, 312, 36);
-            this.btnDashboardRefresh.Click += new System.EventHandler(this.btnDashboardRefresh_Click);
-            actionCard.Controls.Add(this.btnDashboardStart);
-            actionCard.Controls.Add(this.btnDashboardStop);
-            actionCard.Controls.Add(this.btnDashboardAdvanced);
-            actionCard.Controls.Add(this.btnDashboardRefresh);
-            this.pageDashboard.Controls.Add(actionCard);
+            System.Windows.Forms.Panel sessionCard = NewCard("会话信息", 692, 222, 346, 180);
+            this.lblSessionInfo.Font = new System.Drawing.Font("Microsoft YaHei", 10F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(134)));
+            this.lblSessionInfo.ForeColor = System.Drawing.Color.FromArgb(51, 65, 85);
+            this.lblSessionInfo.Location = new System.Drawing.Point(16, 44);
+            this.lblSessionInfo.Name = "lblSessionInfo";
+            this.lblSessionInfo.Size = new System.Drawing.Size(314, 116);
+            this.lblSessionInfo.TabIndex = 0;
+            this.lblSessionInfo.Text = "正在检测...";
+            sessionCard.Controls.Add(this.lblSessionInfo);
+            this.pageDashboard.Controls.Add(sessionCard);
 
             System.Windows.Forms.Panel stateCard = NewCard("功能状态总览", 0, 418, 1038, 250);
             this.lblDashProxy = NewStateLabel(18, 48);
@@ -524,7 +520,7 @@ namespace WifiHotspot
             button.Location = new System.Drawing.Point(14, y);
             button.Name = "nav" + text;
             button.Padding = new System.Windows.Forms.Padding(16, 0, 0, 0);
-            button.Size = new System.Drawing.Size(182, 38);
+            button.Size = new System.Drawing.Size(182, 44);
             button.TabIndex = 2;
             button.Text = text;
             button.TextAlign = System.Drawing.ContentAlignment.MiddleLeft;
@@ -664,6 +660,7 @@ namespace WifiHotspot
         private System.Windows.Forms.Button navConfig;
         private System.Windows.Forms.Button navFeatures;
         private System.Windows.Forms.Button navMonitor;
+        private System.Windows.Forms.Button btnSideProxy;
         private System.Windows.Forms.Label lblSidebarStatus;
         private System.Windows.Forms.Button btnSideDiagnosis;
         private System.Windows.Forms.Panel header;
@@ -690,10 +687,7 @@ namespace WifiHotspot
         private System.Windows.Forms.Label lblDashGuards;
         private System.Windows.Forms.Label lblDashHeader;
         private System.Windows.Forms.Label lblDashTun;
-        private System.Windows.Forms.Button btnDashboardStart;
-        private System.Windows.Forms.Button btnDashboardStop;
-        private System.Windows.Forms.Button btnDashboardAdvanced;
-        private System.Windows.Forms.Button btnDashboardRefresh;
+        private System.Windows.Forms.Label lblSessionInfo;
         private System.Windows.Forms.Panel grpSettings;
         private System.Windows.Forms.Label lblTopology;
         private System.Windows.Forms.ComboBox cmbTopology;

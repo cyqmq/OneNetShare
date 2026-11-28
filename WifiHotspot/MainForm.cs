@@ -24,7 +24,10 @@ namespace WifiHotspot
         private string _lastClientsKey;
         private int _statusBusy;
         private int _clientsBusy;
+        private int _adaptersBusy;
+        private bool _applyingAdapters;
         private bool _shuttingDown;
+        private StatusSnapshot _latestSnapshot;
 
         private enum FeatureHealth
         {
@@ -35,16 +38,34 @@ namespace WifiHotspot
             Info
         }
 
+        private class AdapterSnapshot
+        {
+            public List<IcsManager.NetworkAdapterInfo> Adapters;
+            public List<IcsManager.NetworkAdapterInfo> WiredAdapters;
+            public List<IcsManager.NetworkAdapterInfo> WirelessAdapters;
+        }
+
         private class StatusSnapshot
         {
             public HotspotStatus Status;
             public string Detail;
+            public string Support;
             public string Text;
             public Color Color;
             public bool StartEnabled;
             public bool StopEnabled;
             public bool Running;
             public bool ClearClients;
+            public bool Admin;
+            public bool ProxyRunning;
+            public bool NetworkRunning;
+            public bool MonitorRunning;
+            public bool DnsRunning;
+            public bool IPv6Running;
+            public bool PortalRunning;
+            public bool OutboundRunning;
+            public string NetworkMessage;
+            public ProxySettings Settings;
             public List<string> Clients;
         }
 
@@ -66,7 +87,7 @@ namespace WifiHotspot
             }
 
             LoadConfig();
-            RefreshAdapters();
+            RequestAdaptersRefresh();
             LoadFeatureSwitches();
             StartNetworkNormalizer();
             StartTrafficMonitorIfNeeded();
@@ -137,29 +158,76 @@ namespace WifiHotspot
             }
         }
 
-        private void RefreshAdapters()
+        private void RequestAdaptersRefresh()
         {
-            _adapters = _manager.GetInternetAdapters();
-            _wiredAdapters = new List<IcsManager.NetworkAdapterInfo>();
-            _wirelessAdapters = new List<IcsManager.NetworkAdapterInfo>();
-            foreach (var adapter in _adapters)
+            if (_shuttingDown || IsDisposed) return;
+            if (Interlocked.Exchange(ref _adaptersBusy, 1) != 0) return;
+            ThreadPool.QueueUserWorkItem(delegate(object state)
             {
-                if (adapter.InterfaceType == NetworkInterfaceType.Ethernet)
-                    _wiredAdapters.Add(adapter);
-                else if (adapter.InterfaceType == NetworkInterfaceType.Wireless80211)
-                    _wirelessAdapters.Add(adapter);
+                AdapterSnapshot snapshot = null;
+                try
+                {
+                    var adapters = _manager.GetInternetAdapters() ?? new List<IcsManager.NetworkAdapterInfo>();
+                    var wired = new List<IcsManager.NetworkAdapterInfo>();
+                    var wireless = new List<IcsManager.NetworkAdapterInfo>();
+                    foreach (var adapter in adapters)
+                    {
+                        if (adapter.InterfaceType == NetworkInterfaceType.Ethernet)
+                            wired.Add(adapter);
+                        else if (adapter.InterfaceType == NetworkInterfaceType.Wireless80211)
+                            wireless.Add(adapter);
+                    }
+                    if (wired.Count == 0)
+                        wired.Add(new IcsManager.NetworkAdapterInfo { Name = "未检测到有线网卡", StatusText = "请先连接有线网络" });
+                    if (wireless.Count == 0)
+                        wireless.Add(new IcsManager.NetworkAdapterInfo { Name = "未检测到无线网卡", StatusText = "请启用无线网卡" });
+                    snapshot = new AdapterSnapshot
+                    {
+                        Adapters = adapters,
+                        WiredAdapters = wired,
+                        WirelessAdapters = wireless
+                    };
+                }
+                catch
+                {
+                    snapshot = new AdapterSnapshot
+                    {
+                        Adapters = new List<IcsManager.NetworkAdapterInfo>(),
+                        WiredAdapters = new List<IcsManager.NetworkAdapterInfo> { new IcsManager.NetworkAdapterInfo { Name = "未检测到有线网卡", StatusText = "检测失败" } },
+                        WirelessAdapters = new List<IcsManager.NetworkAdapterInfo> { new IcsManager.NetworkAdapterInfo { Name = "未检测到无线网卡", StatusText = "检测失败" } }
+                    };
+                }
+                try
+                {
+                    BeginInvoke(new Action(() => ApplyAdapters(snapshot)));
+                }
+                catch { }
+                finally
+                {
+                    Interlocked.Exchange(ref _adaptersBusy, 0);
+                }
+            });
+        }
+
+        private void ApplyAdapters(AdapterSnapshot snapshot)
+        {
+            if (_shuttingDown || snapshot == null || IsDisposed) return;
+            _applyingAdapters = true;
+            try
+            {
+                _adapters = snapshot.Adapters;
+                _wiredAdapters = snapshot.WiredAdapters;
+                _wirelessAdapters = snapshot.WirelessAdapters;
+                SetTopologyCombo(_savedTopologyMode);
+                _adapterSource = IsWiredWifiMode() ? _wiredAdapters : _adapters;
+                FillAdapterCombo(cmbAdapter, _adapterSource, _savedAdapterId);
+                FillAdapterCombo(cmbWirelessAdapter, _wirelessAdapters, _savedWirelessAdapterId);
+                UpdateTopologyUi();
             }
-
-            if (_wiredAdapters.Count == 0)
-                _wiredAdapters.Add(new IcsManager.NetworkAdapterInfo { Name = "未检测到有线网卡", StatusText = "请先连接有线网络" });
-            if (_wirelessAdapters.Count == 0)
-                _wirelessAdapters.Add(new IcsManager.NetworkAdapterInfo { Name = "未检测到无线网卡", StatusText = "请启用无线网卡" });
-
-            SetTopologyCombo(_savedTopologyMode);
-            _adapterSource = IsWiredWifiMode() ? _wiredAdapters : _adapters;
-            FillAdapterCombo(cmbAdapter, _adapterSource, _savedAdapterId);
-            FillAdapterCombo(cmbWirelessAdapter, _wirelessAdapters, _savedWirelessAdapterId);
-            UpdateTopologyUi();
+            finally
+            {
+                _applyingAdapters = false;
+            }
         }
 
         private static void FillAdapterCombo(ComboBox combo, List<IcsManager.NetworkAdapterInfo> adapters, string savedId)
@@ -223,9 +291,9 @@ namespace WifiHotspot
 
         private void cmbTopology_SelectedIndexChanged(object sender, EventArgs e)
         {
-            if (_adapters == null) return;
+            if (_applyingAdapters || _adapters == null) return;
             _savedTopologyMode = TopologyMode();
-            RefreshAdapters();
+            RequestAdaptersRefresh();
         }
 
         private int ResolveHotspotInterfaceIndex()
@@ -237,57 +305,15 @@ namespace WifiHotspot
 
         private void CheckSupportAndStatus()
         {
-            var support = _manager.CheckSupport();
-            string statusText;
-            Color color;
-
-            HotspotStatus status = _manager.GetStatus(out statusText);
-            bool canStart;
-            bool canStop;
-            switch (status)
-            {
-                case HotspotStatus.Running:
-                    color = Color.Green;
-                    canStart = false;
-                    canStop = true;
-                    timerStatus.Enabled = true;
-                    RefreshClients();
-                    break;
-                case HotspotStatus.Stopped:
-                    color = Color.DarkOrange;
-                    canStart = true;
-                    canStop = false;
-                    break;
-                case HotspotStatus.Unsupported:
-                case HotspotStatus.Error:
-                default:
-                    color = Color.Red;
-                    canStart = true;
-                    canStop = true;
-                    break;
-            }
-
-            if (!HotspotManager.IsAdministrator())
-            {
-                color = Color.Red;
-                canStart = false;
-                canStop = false;
-            }
-
-            SetHotspotButtons(canStart, canStop);
-            lblStatus.ForeColor = color;
-            lblStatus.Text = string.Format("热点状态: {0}\n支持检测: {1}\n代理/网络层/TTL/DNS: {2}", statusText, support.Message, ModuleStatusText());
-            RefreshDashboard(status, statusText, null);
+            RequestStatusRefresh();
         }
 
         private void SetHotspotButtons(bool startEnabled, bool stopEnabled)
         {
             btnStart.Enabled = startEnabled;
             btnQuickStart.Enabled = startEnabled;
-            btnDashboardStart.Enabled = startEnabled;
             btnStop.Enabled = stopEnabled;
             btnQuickStop.Enabled = stopEnabled;
-            btnDashboardStop.Enabled = stopEnabled;
         }
 
         private void ShowHotspotDiagnosis(string message, IcsManager.NetworkAdapterInfo adapter, IcsManager.NetworkAdapterInfo wirelessAdapter = null)
@@ -492,7 +518,7 @@ namespace WifiHotspot
 
         private void btnRefresh_Click(object sender, EventArgs e)
         {
-            RefreshAdapters();
+            RequestAdaptersRefresh();
             CheckSupportAndStatus();
         }
 
@@ -507,7 +533,7 @@ namespace WifiHotspot
         private void navDashboard_Click(object sender, EventArgs e)
         {
             ShowPage(pageDashboard, navDashboard, "仪表盘", "一眼查看热点、代理、监控和异常");
-            RefreshDashboard(null, null, null);
+            RenderDashboard();
         }
 
         private void navConfig_Click(object sender, EventArgs e)
@@ -527,18 +553,16 @@ namespace WifiHotspot
             RefreshMonitorLog();
         }
 
+        private void btnSideProxy_Click(object sender, EventArgs e)
+        {
+            btnProxy_Click(sender, e);
+        }
+
         private void btnSideDiagnosis_Click(object sender, EventArgs e)
         {
             var diagnosis = _manager.Diagnose(ModuleStatusText(), null, txtSsid.Text, txtPassword.Text);
             using (var form = new DiagnosisForm(diagnosis))
                 form.ShowDialog(this);
-        }
-
-        private void btnDashboardRefresh_Click(object sender, EventArgs e)
-        {
-            RefreshAdapters();
-            CheckSupportAndStatus();
-            RefreshMonitorLog();
         }
 
         private void btnFeatureAdvanced_Click(object sender, EventArgs e)
@@ -555,7 +579,7 @@ namespace WifiHotspot
             page.BringToFront();
             lblHeaderTitle.Text = title;
             lblHeaderSubtitle.Text = subtitle;
-            Button[] navButtons = { navDashboard, navConfig, navFeatures, navMonitor };
+            Button[] navButtons = { navDashboard, navConfig, navFeatures, navMonitor, btnSideProxy };
             foreach (Button button in navButtons)
             {
                 bool selected = button == active;
@@ -577,7 +601,7 @@ namespace WifiHotspot
             chkOutboundGuard.Checked = settings.OutboundGuardEnabled;
             chkMonitorTtl.Checked = settings.MonitorTtl;
             chkMonitorDns.Checked = settings.MonitorDns;
-            RefreshDashboard(null, null, null);
+            RenderDashboard();
         }
 
         private void btnFeatureSave_Click(object sender, EventArgs e)
@@ -766,45 +790,38 @@ namespace WifiHotspot
             txtPassword.PasswordChar = chkShowPassword.Checked ? '\0' : '*';
         }
 
-        private void RefreshDashboard(HotspotStatus? status, string detail, List<string> clients)
+        private void RenderDashboard()
         {
             if (_shuttingDown || IsDisposed) return;
-            HotspotStatus effective = HotspotStatus.Error;
-            if (!status.HasValue || string.IsNullOrEmpty(detail))
-            {
-                string currentDetail;
-                effective = _manager.GetStatus(out currentDetail);
-                if (string.IsNullOrEmpty(detail)) detail = currentDetail;
-            }
-            else
-            {
-                effective = status.Value;
-            }
+            StatusSnapshot snapshot = _latestSnapshot;
+            if (snapshot == null || snapshot.Settings == null) return;
 
-            ProxySettings settings = ProxyConfigManager.Load();
+            ProxySettings settings = snapshot.Settings;
+            HotspotStatus effective = snapshot.Status;
+            bool running = snapshot.Running;
             var issues = new List<string>();
-            RefreshFeatureStates(settings, effective, issues);
+            RefreshFeatureStates(snapshot, issues);
 
-            bool admin = HotspotManager.IsAdministrator();
-            bool running = effective == HotspotStatus.Running;
-            int clientCount = 0;
-            if (clients != null) clientCount = clients.Count;
-            else if (running && lstClients.Items.Count > 0 && !string.Equals(lstClients.Items[0].ToString(), "暂无已连接设备")) clientCount = lstClients.Items.Count;
-
+            int clientCount = snapshot.Clients != null ? snapshot.Clients.Count : 0;
             lblHeroTitle.Text = running ? "热点运行中" : effective == HotspotStatus.Stopped ? "热点已停止" : "热点状态异常";
             lblHeroTitle.ForeColor = running ? Color.FromArgb(22, 101, 52) : effective == HotspotStatus.Stopped ? Color.FromArgb(180, 83, 9) : Color.FromArgb(153, 27, 27);
-            lblHeroStatus.Text = "状态: " + detail + "\n会话: " + HotspotTiming.StatusText + "    管理员权限: " + (admin ? "已获取" : "缺失");
+            lblHeroStatus.Text = "状态: " + snapshot.Detail + "\n会话: " + HotspotTiming.StatusText + "    管理员权限: " + (snapshot.Admin ? "已获取" : "缺失");
 
             SetMetric(lblMetricHotspot, running ? "运行中" : effective == HotspotStatus.Stopped ? "已停止" : "异常",
                 running ? FeatureHealth.Ok : effective == HotspotStatus.Stopped ? FeatureHealth.Warning : FeatureHealth.Error);
-            SetMetric(lblMetricProxy, settings.Enabled ? (ProxyProcessManager.IsRunning() ? "运行中" : "待启动") : "已关闭",
-                settings.Enabled ? (ProxyProcessManager.IsRunning() ? FeatureHealth.Ok : (running ? FeatureHealth.Error : FeatureHealth.Info)) : FeatureHealth.Disabled);
+            SetMetric(lblMetricProxy, settings.Enabled ? (snapshot.ProxyRunning ? "运行中" : "待启动") : "已关闭",
+                settings.Enabled ? (snapshot.ProxyRunning ? FeatureHealth.Ok : (running ? FeatureHealth.Error : FeatureHealth.Info)) : FeatureHealth.Disabled);
             bool monitorEnabled = settings.MonitorEnabled && (settings.MonitorTtl || settings.MonitorDns);
-            bool monitorRunning = TrafficMonitor.Shared.IsRunning || DnsMonitor.Shared.IsRunning;
+            bool monitorRunning = snapshot.MonitorRunning || snapshot.DnsRunning;
             SetMetric(lblMetricMonitor, !monitorEnabled ? "已关闭" : monitorRunning ? "运行中" : (running ? "未运行" : "待启动"),
                 !monitorEnabled ? FeatureHealth.Disabled : monitorRunning ? FeatureHealth.Ok : (running ? FeatureHealth.Error : FeatureHealth.Info));
             SetMetric(lblMetricClients, running ? clientCount.ToString() : "—", running ? FeatureHealth.Info : FeatureHealth.Disabled);
             SetMetric(lblMetricIssues, issues.Count.ToString(), issues.Count == 0 ? FeatureHealth.Ok : FeatureHealth.Warning);
+
+            lblSessionInfo.Text = string.Format("SSID: {0}\n拓扑: {1}\n线程: {2}\n刷新: 后台缓存",
+                string.IsNullOrWhiteSpace(txtSsid.Text) ? "—" : txtSsid.Text,
+                TopologyText(),
+                snapshot.Running ? "热点 / 代理 / 监控" : "待热点启动");
 
             lblAlerts.Text = issues.Count == 0
                 ? "未发现异常。所有已启用的功能均在预期状态；未启用的功能不计入异常。"
@@ -813,13 +830,14 @@ namespace WifiHotspot
             lblSidebarStatus.ForeColor = issues.Count == 0 ? Color.FromArgb(134, 239, 172) : Color.FromArgb(253, 224, 71);
         }
 
-        private void RefreshFeatureStates(ProxySettings settings, HotspotStatus hotspotStatus, List<string> issues)
+        private void RefreshFeatureStates(StatusSnapshot snapshot, List<string> issues)
         {
-            bool admin = HotspotManager.IsAdministrator();
-            bool hotspotRunning = hotspotStatus == HotspotStatus.Running;
-            bool proxyRunning = ProxyProcessManager.IsRunning();
-            bool monitorRunning = TrafficMonitor.Shared.IsRunning;
-            bool dnsRunning = DnsMonitor.Shared.IsRunning;
+            ProxySettings settings = snapshot.Settings;
+            bool admin = snapshot.Admin;
+            bool hotspotRunning = snapshot.Status == HotspotStatus.Running;
+            bool proxyRunning = snapshot.ProxyRunning;
+            bool monitorRunning = snapshot.MonitorRunning;
+            bool dnsRunning = snapshot.DnsRunning;
 
             if (!settings.Enabled)
                 SetStatePair(lblProxyState, lblDashProxy, proxyRunning ? "运行中·开关已关" : "已关闭", proxyRunning ? FeatureHealth.Warning : FeatureHealth.Disabled);
@@ -846,7 +864,7 @@ namespace WifiHotspot
                 SetStatePair(lblNetworkState, lblDashNetwork, "有线模式跳过", FeatureHealth.Info);
             else if (!settings.NetworkEnabled)
                 SetStatePair(lblNetworkState, lblDashNetwork, "已关闭", FeatureHealth.Disabled);
-            else if (NetworkNormalizer.Shared.IsRunning)
+            else if (snapshot.NetworkRunning)
                 SetStatePair(lblNetworkState, lblDashNetwork, "运行中", FeatureHealth.Ok);
             else if (!admin)
             {
@@ -868,7 +886,7 @@ namespace WifiHotspot
 
             if (!settings.IPv6GuardEnabled)
                 SetStatePair(lblIPv6State, lblDashGuards, "已关闭", FeatureHealth.Disabled);
-            else if (IPv6Guard.IsRunning)
+            else if (snapshot.IPv6Running)
                 SetStatePair(lblIPv6State, lblDashGuards, "封禁运行中", FeatureHealth.Ok);
             else if (hotspotRunning)
                 SetStatePair(lblIPv6State, lblDashGuards, "无需封禁", FeatureHealth.Info);
@@ -883,7 +901,7 @@ namespace WifiHotspot
                 SetStatePair(lblPortalState, null, "缺少门户 IP", FeatureHealth.Error);
                 issues.Add("Portal 封堵已开启但未配置主/备 IP。");
             }
-            else if (PortalGuard.IsRunning)
+            else if (snapshot.PortalRunning)
                 SetStatePair(lblPortalState, null, "封堵运行中", FeatureHealth.Ok);
             else if (hotspotRunning)
             {
@@ -897,7 +915,7 @@ namespace WifiHotspot
                 SetStatePair(lblOutboundState, null, "已关闭", FeatureHealth.Disabled);
             else if (settings.TunEnabled)
                 SetStatePair(lblOutboundState, null, "由 TUN 执行", FeatureHealth.Info);
-            else if (OutboundGuard.IsRunning)
+            else if (snapshot.OutboundRunning)
                 SetStatePair(lblOutboundState, null, "封堵运行中", FeatureHealth.Ok);
             else if (hotspotRunning)
             {
@@ -1034,7 +1052,12 @@ namespace WifiHotspot
 
         private void timerStatus_Tick(object sender, EventArgs e)
         {
-            if (_shuttingDown) return;
+            RequestStatusRefresh();
+        }
+
+        private void RequestStatusRefresh()
+        {
+            if (_shuttingDown || IsDisposed) return;
             if (Interlocked.Exchange(ref _statusBusy, 1) != 0) return;
             string ssid = txtSsid.Text;
             string topology = TopologyText();
@@ -1046,8 +1069,17 @@ namespace WifiHotspot
                     string detail;
                     snapshot.Status = _manager.GetStatus(out detail);
                     snapshot.Detail = detail;
-                    bool isAdmin = HotspotManager.IsAdministrator();
-                    string moduleState = ModuleStatusText();
+                    snapshot.Support = _manager.CheckSupport().Message;
+                    snapshot.Settings = ProxyConfigManager.Load();
+                    snapshot.Admin = HotspotManager.IsAdministrator();
+                    snapshot.ProxyRunning = ProxyProcessManager.IsRunning();
+                    snapshot.NetworkRunning = NetworkNormalizer.Shared.IsRunning;
+                    snapshot.NetworkMessage = NetworkNormalizer.Shared.LastMessage ?? string.Empty;
+                    snapshot.MonitorRunning = TrafficMonitor.Shared.IsRunning;
+                    snapshot.DnsRunning = DnsMonitor.Shared.IsRunning;
+                    snapshot.IPv6Running = IPv6Guard.IsRunning;
+                    snapshot.PortalRunning = PortalGuard.IsRunning;
+                    snapshot.OutboundRunning = OutboundGuard.IsRunning;
                     snapshot.Running = snapshot.Status == HotspotStatus.Running;
                     snapshot.ClearClients = !snapshot.Running;
                     snapshot.Color = snapshot.Status == HotspotStatus.Running ? Color.Green
@@ -1055,15 +1087,19 @@ namespace WifiHotspot
                     string failure = snapshot.Status == HotspotStatus.Running || snapshot.Status == HotspotStatus.Stopped
                         ? string.Empty : "\n状态检测失败，可尝试启动/停止";
                     string ssidLine = snapshot.Status == HotspotStatus.Running ? "\nSSID: " + ssid : string.Empty;
-                    snapshot.Text = "热点状态: " + detail + ssidLine + "\n拓扑: " + topology + failure + "\n代理/网络层/TTL/DNS: " + moduleState;
-                    snapshot.StartEnabled = isAdmin && snapshot.Status != HotspotStatus.Running;
-                    snapshot.StopEnabled = isAdmin && snapshot.Status != HotspotStatus.Stopped;
+                    string moduleState = BuildModuleStatusText(snapshot);
+                    snapshot.Text = "热点状态: " + detail + ssidLine + "\n拓扑: " + topology
+                        + "\n支持检测: " + snapshot.Support + failure + "\n代理/网络层/TTL/DNS: " + moduleState;
+                    snapshot.StartEnabled = snapshot.Admin && snapshot.Status != HotspotStatus.Running;
+                    snapshot.StopEnabled = snapshot.Admin && snapshot.Status != HotspotStatus.Stopped;
                     if (snapshot.Running) snapshot.Clients = _manager.GetConnectedClients();
                 }
                 catch
                 {
                     snapshot.Status = HotspotStatus.Error;
                     snapshot.Detail = "状态检测失败，可尝试启动/停止";
+                    snapshot.Support = "检测失败";
+                    snapshot.Settings = new ProxySettings();
                     snapshot.Color = Color.Red;
                     snapshot.Text = "热点状态: " + snapshot.Detail;
                     snapshot.StartEnabled = true;
@@ -1085,12 +1121,35 @@ namespace WifiHotspot
         private void ApplyStatusSnapshot(StatusSnapshot snapshot)
         {
             if (_shuttingDown || snapshot == null || IsDisposed) return;
+            _latestSnapshot = snapshot;
             lblStatus.ForeColor = snapshot.Color;
             if (lblStatus.Text != snapshot.Text) lblStatus.Text = snapshot.Text;
             SetHotspotButtons(snapshot.StartEnabled, snapshot.StopEnabled);
-            RefreshDashboard(snapshot.Status, snapshot.Detail, snapshot.Clients);
+            RenderDashboard();
             ApplyClients(snapshot.Clients, snapshot.Running);
             if (snapshot.ClearClients) ApplyClients(null, false);
+        }
+
+        private static string BuildModuleStatusText(StatusSnapshot snapshot)
+        {
+            string proxy = snapshot.ProxyRunning ? "运行" : "未运行";
+            string network;
+            if (snapshot.NetworkRunning)
+            {
+                network = "运行";
+            }
+            else
+            {
+                string message = snapshot.NetworkMessage ?? string.Empty;
+                if (message.Contains("未启用")) network = "未运行(未启用)";
+                else if (message.Contains("WinDivert")) network = "未运行(缺 WinDivert 文件)";
+                else if (message.Contains("管理员")) network = "未运行(需管理员)";
+                else if (message.Contains("初始化失败")) network = "未运行(初始化失败)";
+                else network = "未运行";
+            }
+            string monitor = snapshot.MonitorRunning ? "TTL监控运行" : "TTL监控未运行";
+            string dns = snapshot.DnsRunning ? "DNS监控运行" : "DNS监控未运行";
+            return proxy + " / " + network + " / " + monitor + " / " + dns;
         }
     }
 }
