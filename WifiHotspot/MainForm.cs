@@ -26,9 +26,19 @@ namespace WifiHotspot
         private int _clientsBusy;
         private bool _shuttingDown;
 
+        private enum FeatureHealth
+        {
+            Ok,
+            Warning,
+            Error,
+            Disabled,
+            Info
+        }
+
         private class StatusSnapshot
         {
             public HotspotStatus Status;
+            public string Detail;
             public string Text;
             public Color Color;
             public bool StartEnabled;
@@ -52,16 +62,19 @@ namespace WifiHotspot
             {
                 lblStatus.ForeColor = Color.Red;
                 lblStatus.Text = "警告：当前不是管理员权限，热点功能无法正常工作。\n请右键程序 → 以管理员身份运行。";
-                btnStart.Enabled = false;
-                btnStop.Enabled = false;
+                SetHotspotButtons(false, false);
             }
 
             LoadConfig();
             RefreshAdapters();
+            LoadFeatureSwitches();
             StartNetworkNormalizer();
             StartTrafficMonitorIfNeeded();
             CheckSupportAndStatus();
+            RefreshMonitorLog();
+            ShowPage(pageDashboard, navDashboard, "仪表盘", "一眼查看热点、代理、监控和异常");
             timerStatus.Start();
+            timerMonitor.Start();
         }
 
         private void LoadConfig()
@@ -229,38 +242,52 @@ namespace WifiHotspot
             Color color;
 
             HotspotStatus status = _manager.GetStatus(out statusText);
+            bool canStart;
+            bool canStop;
             switch (status)
             {
                 case HotspotStatus.Running:
                     color = Color.Green;
-                    btnStart.Enabled = false;
-                    btnStop.Enabled = true;
+                    canStart = false;
+                    canStop = true;
                     timerStatus.Enabled = true;
                     RefreshClients();
                     break;
                 case HotspotStatus.Stopped:
                     color = Color.DarkOrange;
-                    btnStart.Enabled = true;
-                    btnStop.Enabled = false;
+                    canStart = true;
+                    canStop = false;
                     break;
                 case HotspotStatus.Unsupported:
                 case HotspotStatus.Error:
                 default:
                     color = Color.Red;
-                    btnStart.Enabled = true;
-                    btnStop.Enabled = true;
+                    canStart = true;
+                    canStop = true;
                     break;
             }
 
             if (!HotspotManager.IsAdministrator())
             {
                 color = Color.Red;
-                btnStart.Enabled = false;
-                btnStop.Enabled = false;
+                canStart = false;
+                canStop = false;
             }
 
+            SetHotspotButtons(canStart, canStop);
             lblStatus.ForeColor = color;
             lblStatus.Text = string.Format("热点状态: {0}\n支持检测: {1}\n代理/网络层/TTL/DNS: {2}", statusText, support.Message, ModuleStatusText());
+            RefreshDashboard(status, statusText, null);
+        }
+
+        private void SetHotspotButtons(bool startEnabled, bool stopEnabled)
+        {
+            btnStart.Enabled = startEnabled;
+            btnQuickStart.Enabled = startEnabled;
+            btnDashboardStart.Enabled = startEnabled;
+            btnStop.Enabled = stopEnabled;
+            btnQuickStop.Enabled = stopEnabled;
+            btnDashboardStop.Enabled = stopEnabled;
         }
 
         private void ShowHotspotDiagnosis(string message, IcsManager.NetworkAdapterInfo adapter, IcsManager.NetworkAdapterInfo wirelessAdapter = null)
@@ -353,7 +380,7 @@ namespace WifiHotspot
             if (cmbWirelessAdapter.SelectedIndex >= 0 && cmbWirelessAdapter.SelectedIndex < _wirelessAdapters.Count)
                 selectedWireless = _wirelessAdapters[cmbWirelessAdapter.SelectedIndex];
 
-            btnStart.Enabled = false;
+            SetHotspotButtons(false, false);
             lblStatus.ForeColor = Color.Blue;
             lblStatus.Text = "正在启动热点，请稍候...";
             lblStatus.Refresh();
@@ -447,7 +474,7 @@ namespace WifiHotspot
 
         private void btnStop_Click(object sender, EventArgs e)
         {
-            btnStop.Enabled = false;
+            SetHotspotButtons(false, false);
             lblStatus.ForeColor = Color.Blue;
             lblStatus.Text = "正在停止热点...";
             lblStatus.Refresh();
@@ -473,7 +500,172 @@ namespace WifiHotspot
         {
             using (var form = new ProxySettingsForm())
                 form.ShowDialog(this);
+            LoadFeatureSwitches();
             CheckSupportAndStatus();
+        }
+
+        private void navDashboard_Click(object sender, EventArgs e)
+        {
+            ShowPage(pageDashboard, navDashboard, "仪表盘", "一眼查看热点、代理、监控和异常");
+            RefreshDashboard(null, null, null);
+        }
+
+        private void navConfig_Click(object sender, EventArgs e)
+        {
+            ShowPage(pageConfig, navConfig, "热点配置", "设置 SSID、密码、拓扑和上行网卡");
+        }
+
+        private void navFeatures_Click(object sender, EventArgs e)
+        {
+            ShowPage(pageFeatures, navFeatures, "功能开关", "查看并切换代理、防护和监控功能");
+            LoadFeatureSwitches();
+        }
+
+        private void navMonitor_Click(object sender, EventArgs e)
+        {
+            ShowPage(pageMonitor, navMonitor, "运行监控", "连接设备、探针事件与详细运行状态");
+            RefreshMonitorLog();
+        }
+
+        private void btnSideDiagnosis_Click(object sender, EventArgs e)
+        {
+            var diagnosis = _manager.Diagnose(ModuleStatusText(), null, txtSsid.Text, txtPassword.Text);
+            using (var form = new DiagnosisForm(diagnosis))
+                form.ShowDialog(this);
+        }
+
+        private void btnDashboardRefresh_Click(object sender, EventArgs e)
+        {
+            RefreshAdapters();
+            CheckSupportAndStatus();
+            RefreshMonitorLog();
+        }
+
+        private void btnFeatureAdvanced_Click(object sender, EventArgs e)
+        {
+            btnProxy_Click(sender, e);
+        }
+
+        private void ShowPage(Panel page, Button active, string title, string subtitle)
+        {
+            pageDashboard.Visible = page == pageDashboard;
+            pageConfig.Visible = page == pageConfig;
+            pageFeatures.Visible = page == pageFeatures;
+            pageMonitor.Visible = page == pageMonitor;
+            page.BringToFront();
+            lblHeaderTitle.Text = title;
+            lblHeaderSubtitle.Text = subtitle;
+            Button[] navButtons = { navDashboard, navConfig, navFeatures, navMonitor };
+            foreach (Button button in navButtons)
+            {
+                bool selected = button == active;
+                button.BackColor = selected ? Color.FromArgb(37, 99, 235) : Color.FromArgb(30, 41, 59);
+                button.ForeColor = selected ? Color.White : Color.FromArgb(226, 232, 240);
+            }
+        }
+
+        private void LoadFeatureSwitches()
+        {
+            ProxySettings settings = ProxyConfigManager.Load();
+            chkProxyEnabled.Checked = settings.Enabled && settings.AutoStartProxy;
+            chkHeaders.Checked = settings.Headers;
+            chkDeviceForge.Checked = settings.DeviceForgeEnabled;
+            chkNetworkNormalizer.Checked = settings.NetworkEnabled;
+            chkTun.Checked = settings.TunEnabled;
+            chkIPv6Guard.Checked = settings.IPv6GuardEnabled;
+            chkPortalBlock.Checked = settings.PortalBlockEnabled;
+            chkOutboundGuard.Checked = settings.OutboundGuardEnabled;
+            chkMonitorTtl.Checked = settings.MonitorTtl;
+            chkMonitorDns.Checked = settings.MonitorDns;
+            RefreshDashboard(null, null, null);
+        }
+
+        private void btnFeatureSave_Click(object sender, EventArgs e)
+        {
+            ProxySettings before = ProxyConfigManager.Load();
+            ProxySettings settings = ProxyConfigManager.Load();
+            settings.Enabled = chkProxyEnabled.Checked;
+            settings.AutoStartProxy = chkProxyEnabled.Checked;
+            settings.Headers = chkHeaders.Checked;
+            settings.DeviceForgeEnabled = chkDeviceForge.Checked;
+            settings.NetworkEnabled = chkNetworkNormalizer.Checked;
+            settings.TunEnabled = chkTun.Checked;
+            if (settings.TunEnabled) settings.NetworkEnabled = false;
+            settings.IPv6GuardEnabled = chkIPv6Guard.Checked;
+            settings.PortalBlockEnabled = chkPortalBlock.Checked;
+            settings.OutboundGuardEnabled = chkOutboundGuard.Checked;
+            settings.MonitorTtl = chkMonitorTtl.Checked;
+            settings.MonitorDns = chkMonitorDns.Checked;
+            settings.MonitorEnabled = settings.MonitorTtl || settings.MonitorDns;
+            ProxyConfigManager.Save(settings);
+            string result = ApplyFeatureRuntime(settings, before);
+            LoadFeatureSwitches();
+            CheckSupportAndStatus();
+            MessageBox.Show(this, "功能开关已保存。\n" + result, "功能开关", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+
+        private string ApplyFeatureRuntime(ProxySettings settings, ProxySettings before)
+        {
+            var messages = new List<string>();
+            string detail;
+            HotspotStatus hotspotStatus = _manager.GetStatus(out detail);
+            bool hotspotRunning = hotspotStatus == HotspotStatus.Running;
+            bool proxyRunning = ProxyProcessManager.IsRunning();
+
+            if (settings.Enabled && proxyRunning)
+            {
+                messages.Add(ProxyProcessManager.Stop());
+                messages.Add(ProxyProcessManager.Start(ProxyConfigManager.DefaultConfigPath));
+            }
+            else if (!settings.Enabled && proxyRunning)
+            {
+                messages.Add(ProxyProcessManager.Stop());
+            }
+
+            bool wantNetwork = settings.NetworkEnabled && !settings.TunEnabled && !IsWiredWifiMode();
+            if (wantNetwork && !NetworkNormalizer.Shared.IsRunning)
+                messages.Add(NetworkNormalizer.Shared.Start(settings).Message);
+            else if (!wantNetwork && NetworkNormalizer.Shared.IsRunning)
+                messages.Add(NetworkNormalizer.Shared.Stop().Message);
+
+            bool wantMonitor = settings.MonitorEnabled && (settings.MonitorTtl || settings.MonitorDns);
+            if (!wantMonitor && (TrafficMonitor.Shared.IsRunning || DnsMonitor.Shared.IsRunning))
+                messages.Add(TrafficMonitor.Shared.Stop().Message);
+            else if (wantMonitor && hotspotRunning && !TrafficMonitor.Shared.IsRunning)
+                messages.Add(TrafficMonitor.Shared.Start(settings).Message);
+
+            if (!settings.IPv6GuardEnabled && IPv6Guard.IsRunning)
+                messages.Add(IPv6Guard.Stop().Message);
+            else if (settings.IPv6GuardEnabled && hotspotRunning && !IPv6Guard.IsRunning)
+            {
+                if (ProxyDiagnostics.FindHotspotGlobalIPv6().Count > 0)
+                    messages.Add(IPv6Guard.Start(settings.IPv6Policy, ResolveHotspotInterfaceIndex()).Message);
+                else
+                    messages.Add("未检测到公网 IPv6，IPv6 封禁按设计暂不启用。");
+            }
+
+            if (!settings.PortalBlockEnabled && PortalGuard.IsRunning)
+                messages.Add(PortalGuard.Stop().Message);
+            else if (settings.PortalBlockEnabled && hotspotRunning && !PortalGuard.IsRunning)
+            {
+                if (string.IsNullOrWhiteSpace(settings.PortalPrimaryIP) && string.IsNullOrWhiteSpace(settings.PortalSecondaryIP))
+                    messages.Add("Portal 封堵已开启但未配置主/备 IP，请在高级代理设置中填写。");
+                else
+                    messages.Add(PortalGuard.Start(settings.PortalPrimaryIP, settings.PortalSecondaryIP, ResolveHotspotInterfaceIndex()).Message);
+            }
+
+            if (!settings.OutboundGuardEnabled && OutboundGuard.IsRunning)
+                messages.Add(OutboundGuard.Stop().Message);
+            else if (settings.OutboundGuardEnabled && hotspotRunning && !OutboundGuard.IsRunning)
+            {
+                if (settings.TunEnabled)
+                    messages.Add("全局 TUN 模式由代理层执行出站封堵。");
+                else
+                    messages.Add(OutboundGuard.Start(settings, ResolveHotspotInterfaceIndex()).Message);
+            }
+
+            if (before == null) messages.Add("配置已更新。");
+            return string.Join("\n", messages.ToArray());
         }
 
         private void StartNetworkNormalizer()
@@ -520,6 +712,7 @@ namespace WifiHotspot
             if (_shuttingDown) return;
             _shuttingDown = true;
             timerStatus.Stop();
+            timerMonitor.Stop();
             for (int i = 0; i < 100 && (Volatile.Read(ref _statusBusy) != 0 || Volatile.Read(ref _clientsBusy) != 0); i++)
                 Thread.Sleep(20);
             StopRuntimeComponents(true);
@@ -573,6 +766,250 @@ namespace WifiHotspot
             txtPassword.PasswordChar = chkShowPassword.Checked ? '\0' : '*';
         }
 
+        private void RefreshDashboard(HotspotStatus? status, string detail, List<string> clients)
+        {
+            if (_shuttingDown || IsDisposed) return;
+            HotspotStatus effective = HotspotStatus.Error;
+            if (!status.HasValue || string.IsNullOrEmpty(detail))
+            {
+                string currentDetail;
+                effective = _manager.GetStatus(out currentDetail);
+                if (string.IsNullOrEmpty(detail)) detail = currentDetail;
+            }
+            else
+            {
+                effective = status.Value;
+            }
+
+            ProxySettings settings = ProxyConfigManager.Load();
+            var issues = new List<string>();
+            RefreshFeatureStates(settings, effective, issues);
+
+            bool admin = HotspotManager.IsAdministrator();
+            bool running = effective == HotspotStatus.Running;
+            int clientCount = 0;
+            if (clients != null) clientCount = clients.Count;
+            else if (running && lstClients.Items.Count > 0 && !string.Equals(lstClients.Items[0].ToString(), "暂无已连接设备")) clientCount = lstClients.Items.Count;
+
+            lblHeroTitle.Text = running ? "热点运行中" : effective == HotspotStatus.Stopped ? "热点已停止" : "热点状态异常";
+            lblHeroTitle.ForeColor = running ? Color.FromArgb(22, 101, 52) : effective == HotspotStatus.Stopped ? Color.FromArgb(180, 83, 9) : Color.FromArgb(153, 27, 27);
+            lblHeroStatus.Text = "状态: " + detail + "\n会话: " + HotspotTiming.StatusText + "    管理员权限: " + (admin ? "已获取" : "缺失");
+
+            SetMetric(lblMetricHotspot, running ? "运行中" : effective == HotspotStatus.Stopped ? "已停止" : "异常",
+                running ? FeatureHealth.Ok : effective == HotspotStatus.Stopped ? FeatureHealth.Warning : FeatureHealth.Error);
+            SetMetric(lblMetricProxy, settings.Enabled ? (ProxyProcessManager.IsRunning() ? "运行中" : "待启动") : "已关闭",
+                settings.Enabled ? (ProxyProcessManager.IsRunning() ? FeatureHealth.Ok : (running ? FeatureHealth.Error : FeatureHealth.Info)) : FeatureHealth.Disabled);
+            bool monitorEnabled = settings.MonitorEnabled && (settings.MonitorTtl || settings.MonitorDns);
+            bool monitorRunning = TrafficMonitor.Shared.IsRunning || DnsMonitor.Shared.IsRunning;
+            SetMetric(lblMetricMonitor, !monitorEnabled ? "已关闭" : monitorRunning ? "运行中" : (running ? "未运行" : "待启动"),
+                !monitorEnabled ? FeatureHealth.Disabled : monitorRunning ? FeatureHealth.Ok : (running ? FeatureHealth.Error : FeatureHealth.Info));
+            SetMetric(lblMetricClients, running ? clientCount.ToString() : "—", running ? FeatureHealth.Info : FeatureHealth.Disabled);
+            SetMetric(lblMetricIssues, issues.Count.ToString(), issues.Count == 0 ? FeatureHealth.Ok : FeatureHealth.Warning);
+
+            lblAlerts.Text = issues.Count == 0
+                ? "未发现异常。所有已启用的功能均在预期状态；未启用的功能不计入异常。"
+                : string.Join("\n", issues.ToArray());
+            lblSidebarStatus.Text = "系统状态\n" + (issues.Count == 0 ? (running ? "运行正常" : "待启动热点") : issues.Count + " 项需要关注");
+            lblSidebarStatus.ForeColor = issues.Count == 0 ? Color.FromArgb(134, 239, 172) : Color.FromArgb(253, 224, 71);
+        }
+
+        private void RefreshFeatureStates(ProxySettings settings, HotspotStatus hotspotStatus, List<string> issues)
+        {
+            bool admin = HotspotManager.IsAdministrator();
+            bool hotspotRunning = hotspotStatus == HotspotStatus.Running;
+            bool proxyRunning = ProxyProcessManager.IsRunning();
+            bool monitorRunning = TrafficMonitor.Shared.IsRunning;
+            bool dnsRunning = DnsMonitor.Shared.IsRunning;
+
+            if (!settings.Enabled)
+                SetStatePair(lblProxyState, lblDashProxy, proxyRunning ? "运行中·开关已关" : "已关闭", proxyRunning ? FeatureHealth.Warning : FeatureHealth.Disabled);
+            else if (!hotspotRunning && !proxyRunning)
+                SetStatePair(lblProxyState, lblDashProxy, "待热点启动", FeatureHealth.Info);
+            else if (proxyRunning)
+                SetStatePair(lblProxyState, lblDashProxy, "运行中", FeatureHealth.Ok);
+            else
+            {
+                SetStatePair(lblProxyState, lblDashProxy, "未运行", FeatureHealth.Error);
+                issues.Add("代理服务已启用但未运行。");
+            }
+
+            bool headerOn = settings.Enabled && settings.DeviceForgeEnabled && settings.Headers;
+            SetStatePair(lblHeaderState, lblDashHeader, !headerOn ? "已关闭" : proxyRunning ? "已启用" : "已配置·待代理运行",
+                !headerOn ? FeatureHealth.Disabled : proxyRunning ? FeatureHealth.Ok : FeatureHealth.Info);
+
+            SetStatePair(lblDeviceForgeState, null, !settings.DeviceForgeEnabled ? "已关闭" : proxyRunning ? "已启用" : "已配置·待代理运行",
+                !settings.DeviceForgeEnabled ? FeatureHealth.Disabled : proxyRunning ? FeatureHealth.Ok : FeatureHealth.Info);
+
+            if (settings.TunEnabled)
+                SetStatePair(lblNetworkState, lblDashNetwork, "由 TUN 接管", FeatureHealth.Info);
+            else if (IsWiredWifiMode())
+                SetStatePair(lblNetworkState, lblDashNetwork, "有线模式跳过", FeatureHealth.Info);
+            else if (!settings.NetworkEnabled)
+                SetStatePair(lblNetworkState, lblDashNetwork, "已关闭", FeatureHealth.Disabled);
+            else if (NetworkNormalizer.Shared.IsRunning)
+                SetStatePair(lblNetworkState, lblDashNetwork, "运行中", FeatureHealth.Ok);
+            else if (!admin)
+            {
+                SetStatePair(lblNetworkState, lblDashNetwork, "缺少管理员权限", FeatureHealth.Error);
+                issues.Add("网络层归一化缺少管理员权限。");
+            }
+            else
+            {
+                SetStatePair(lblNetworkState, lblDashNetwork, "未运行", FeatureHealth.Error);
+                issues.Add("网络层归一化已启用但未运行。");
+            }
+
+            if (!settings.TunEnabled)
+                SetStatePair(lblTunState, lblDashTun, "已关闭", FeatureHealth.Disabled);
+            else if (!proxyRunning)
+                SetStatePair(lblTunState, lblDashTun, "待代理运行", FeatureHealth.Info);
+            else
+                SetStatePair(lblTunState, lblDashTun, "已启用", FeatureHealth.Ok);
+
+            if (!settings.IPv6GuardEnabled)
+                SetStatePair(lblIPv6State, lblDashGuards, "已关闭", FeatureHealth.Disabled);
+            else if (IPv6Guard.IsRunning)
+                SetStatePair(lblIPv6State, lblDashGuards, "封禁运行中", FeatureHealth.Ok);
+            else if (hotspotRunning)
+                SetStatePair(lblIPv6State, lblDashGuards, "无需封禁", FeatureHealth.Info);
+            else
+                SetStatePair(lblIPv6State, lblDashGuards, "待热点检测", FeatureHealth.Info);
+
+            bool portalIpMissing = string.IsNullOrWhiteSpace(settings.PortalPrimaryIP) && string.IsNullOrWhiteSpace(settings.PortalSecondaryIP);
+            if (!settings.PortalBlockEnabled)
+                SetStatePair(lblPortalState, null, "已关闭", FeatureHealth.Disabled);
+            else if (portalIpMissing)
+            {
+                SetStatePair(lblPortalState, null, "缺少门户 IP", FeatureHealth.Error);
+                issues.Add("Portal 封堵已开启但未配置主/备 IP。");
+            }
+            else if (PortalGuard.IsRunning)
+                SetStatePair(lblPortalState, null, "封堵运行中", FeatureHealth.Ok);
+            else if (hotspotRunning)
+            {
+                SetStatePair(lblPortalState, null, "未运行", FeatureHealth.Error);
+                issues.Add("Portal 封堵已启用但未运行。");
+            }
+            else
+                SetStatePair(lblPortalState, null, "待热点启动", FeatureHealth.Info);
+
+            if (!settings.OutboundGuardEnabled)
+                SetStatePair(lblOutboundState, null, "已关闭", FeatureHealth.Disabled);
+            else if (settings.TunEnabled)
+                SetStatePair(lblOutboundState, null, "由 TUN 执行", FeatureHealth.Info);
+            else if (OutboundGuard.IsRunning)
+                SetStatePair(lblOutboundState, null, "封堵运行中", FeatureHealth.Ok);
+            else if (hotspotRunning)
+            {
+                SetStatePair(lblOutboundState, null, "未运行", FeatureHealth.Error);
+                issues.Add("出站封堵已启用但未运行。");
+            }
+            else
+                SetStatePair(lblOutboundState, null, "待热点启动", FeatureHealth.Info);
+
+            if (!settings.MonitorEnabled || !settings.MonitorTtl)
+                SetStatePair(lblMonitorTtlState, lblDashMonitor, "已关闭", FeatureHealth.Disabled);
+            else if (monitorRunning)
+                SetStatePair(lblMonitorTtlState, lblDashMonitor, "监控运行中", FeatureHealth.Ok);
+            else if (hotspotRunning)
+            {
+                SetStatePair(lblMonitorTtlState, lblDashMonitor, "未运行", FeatureHealth.Error);
+                issues.Add("TTL 监控已启用但未运行。");
+            }
+            else
+                SetStatePair(lblMonitorTtlState, lblDashMonitor, "待热点启动", FeatureHealth.Info);
+
+            if (!settings.MonitorEnabled || !settings.MonitorDns)
+                SetStatePair(lblMonitorDnsState, null, "已关闭", FeatureHealth.Disabled);
+            else if (dnsRunning)
+                SetStatePair(lblMonitorDnsState, null, "监控运行中", FeatureHealth.Ok);
+            else if (hotspotRunning)
+            {
+                SetStatePair(lblMonitorDnsState, null, "未运行", FeatureHealth.Error);
+                issues.Add("DNS 监控已启用但未运行。");
+            }
+            else
+                SetStatePair(lblMonitorDnsState, null, "待热点启动", FeatureHealth.Info);
+        }
+
+        private void SetStatePair(Label featureLabel, Label dashboardLabel, string text, FeatureHealth health)
+        {
+            SetState(featureLabel, text, health);
+            if (dashboardLabel != null) SetState(dashboardLabel, text, health);
+        }
+
+        private void SetState(Label label, string text, FeatureHealth health)
+        {
+            if (label == null) return;
+            label.Text = text;
+            label.ForeColor = HealthColor(health);
+        }
+
+        private void SetMetric(Label label, string text, FeatureHealth health)
+        {
+            if (label == null) return;
+            label.Text = text;
+            label.ForeColor = HealthColor(health);
+        }
+
+        private static Color HealthColor(FeatureHealth health)
+        {
+            switch (health)
+            {
+                case FeatureHealth.Ok: return Color.FromArgb(22, 101, 52);
+                case FeatureHealth.Warning: return Color.FromArgb(180, 83, 9);
+                case FeatureHealth.Error: return Color.FromArgb(153, 27, 27);
+                case FeatureHealth.Disabled: return Color.FromArgb(100, 116, 139);
+                default: return Color.FromArgb(37, 99, 235);
+            }
+        }
+
+        private void timerMonitor_Tick(object sender, EventArgs e)
+        {
+            if (_shuttingDown) return;
+            RefreshMonitorLog();
+        }
+
+        private void RefreshMonitorLog()
+        {
+            if (_shuttingDown || IsDisposed) return;
+            string path = ProxyProcessManager.ProbeLogPath;
+            if (!File.Exists(path))
+            {
+                if (txtMonitorLog.Text.Length > 0) txtMonitorLog.Clear();
+                return;
+            }
+            try
+            {
+                using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                {
+                    long start = Math.Max(0L, stream.Length - 12000L);
+                    stream.Seek(start, SeekOrigin.Begin);
+                    byte[] buffer = new byte[stream.Length - start];
+                    int read = 0;
+                    while (read < buffer.Length)
+                    {
+                        int count = stream.Read(buffer, read, buffer.Length - read);
+                        if (count == 0) break;
+                        read += count;
+                    }
+                    string text = Encoding.UTF8.GetString(buffer, 0, read);
+                    string[] lines = text.Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries);
+                    int from = Math.Max(0, lines.Length - 160);
+                    string display = string.Join(Environment.NewLine, lines, from, lines.Length - from);
+                    if (txtMonitorLog.Text == display) return;
+                    bool atBottom = txtMonitorLog.SelectionStart >= txtMonitorLog.TextLength - 2;
+                    txtMonitorLog.Text = display;
+                    if (atBottom)
+                    {
+                        txtMonitorLog.SelectionStart = txtMonitorLog.TextLength;
+                        txtMonitorLog.ScrollToCaret();
+                    }
+                }
+            }
+            catch { }
+        }
+
         private static string ModuleStatusText()
         {
             string proxy = ProxyProcessManager.IsRunning() ? "运行" : "未运行";
@@ -608,6 +1045,7 @@ namespace WifiHotspot
                 {
                     string detail;
                     snapshot.Status = _manager.GetStatus(out detail);
+                    snapshot.Detail = detail;
                     bool isAdmin = HotspotManager.IsAdministrator();
                     string moduleState = ModuleStatusText();
                     snapshot.Running = snapshot.Status == HotspotStatus.Running;
@@ -625,8 +1063,9 @@ namespace WifiHotspot
                 catch
                 {
                     snapshot.Status = HotspotStatus.Error;
+                    snapshot.Detail = "状态检测失败，可尝试启动/停止";
                     snapshot.Color = Color.Red;
-                    snapshot.Text = "热点状态: 状态检测失败，可尝试启动/停止";
+                    snapshot.Text = "热点状态: " + snapshot.Detail;
                     snapshot.StartEnabled = true;
                     snapshot.StopEnabled = true;
                     snapshot.ClearClients = true;
@@ -648,8 +1087,8 @@ namespace WifiHotspot
             if (_shuttingDown || snapshot == null || IsDisposed) return;
             lblStatus.ForeColor = snapshot.Color;
             if (lblStatus.Text != snapshot.Text) lblStatus.Text = snapshot.Text;
-            btnStart.Enabled = snapshot.StartEnabled;
-            btnStop.Enabled = snapshot.StopEnabled;
+            SetHotspotButtons(snapshot.StartEnabled, snapshot.StopEnabled);
+            RefreshDashboard(snapshot.Status, snapshot.Detail, snapshot.Clients);
             ApplyClients(snapshot.Clients, snapshot.Running);
             if (snapshot.ClearClients) ApplyClients(null, false);
         }
