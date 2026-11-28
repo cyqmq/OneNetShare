@@ -35,6 +35,14 @@ namespace WifiHotspot
         Unknown
     }
 
+    internal enum ServiceRuntimeState
+    {
+        Stopped,
+        Running,
+        Transition,
+        Unknown
+    }
+
     public class HotspotManager
     {
         private readonly IcsManager _ics = new IcsManager();
@@ -286,8 +294,13 @@ namespace WifiHotspot
                         "设置 → 网络和 Internet → 移动热点；如由单位策略禁用，需要管理员在组策略中放开。", "ms-settings:network-mobilehotspot");
             }
 
-            if (!IsServiceRunning("WlanSvc"))
-                AddIssue(diagnosis, "WLAN AutoConfig 服务未运行", "sc query WlanSvc 未显示正在运行。",
+            string wlanServiceOutput;
+            ServiceRuntimeState wlanServiceState = GetServiceRuntimeState("WlanSvc", out wlanServiceOutput);
+            if (wlanServiceState == ServiceRuntimeState.Transition)
+                AddIssue(diagnosis, "WLAN AutoConfig 服务处于过渡状态", "WlanSvc 未稳定在运行或已停止状态。\n" + wlanServiceOutput,
+                    "重启电脑后重试；若反复出现，services.msc → WLAN AutoConfig → 检查启动类型和依赖服务。", "services.msc");
+            else if (wlanServiceState != ServiceRuntimeState.Running)
+                AddIssue(diagnosis, "WLAN AutoConfig 服务未运行", "sc query WlanSvc 未显示正在运行。\n" + wlanServiceOutput,
                     "services.msc → WLAN AutoConfig → 启动，并将启动类型设为自动。", "services.msc");
 
             if (!IsServiceRunning("icssvc"))
@@ -330,6 +343,40 @@ namespace WifiHotspot
         {
             var r = RunCommand("sc", "query " + serviceName);
             return r.Success && IsWlanServiceRunning(r.Message);
+        }
+
+        private static ServiceRuntimeState GetServiceRuntimeState(string serviceName, out string output)
+        {
+            var r = RunCommand("sc", "query " + serviceName);
+            output = r.Message;
+            return r.Success ? GetServiceRuntimeStateFromOutput(output) : ServiceRuntimeState.Unknown;
+        }
+
+        private static ServiceRuntimeState GetServiceRuntimeStateFromOutput(string output)
+        {
+            if (string.IsNullOrEmpty(output)) return ServiceRuntimeState.Unknown;
+
+            Match state = Regex.Match(output, @"(?:STATE|状态)\s*[:：]\s*(\d+)\s+([A-Za-z_]+)", RegexOptions.IgnoreCase);
+            if (state.Success)
+            {
+                int code;
+                if (int.TryParse(state.Groups[1].Value, out code))
+                {
+                    if (code == 1) return ServiceRuntimeState.Stopped;
+                    if (code == 4) return ServiceRuntimeState.Running;
+                    if (code == 2 || code == 3 || code == 5 || code == 6 || code == 7) return ServiceRuntimeState.Transition;
+                }
+            }
+
+            if (Regex.IsMatch(output, @"STATE\s*:\s*4\s+RUNNING", RegexOptions.IgnoreCase) ||
+                Regex.IsMatch(output, @"状态\s*[:：]\s*4\s*正在运行") || output.Contains("正在运行"))
+                return ServiceRuntimeState.Running;
+            if (Regex.IsMatch(output, @"STATE\s*:\s*1\s+STOPPED", RegexOptions.IgnoreCase) ||
+                Regex.IsMatch(output, @"状态\s*[:：]\s*1\s*已停止") || output.Contains("已停止"))
+                return ServiceRuntimeState.Stopped;
+            if (Regex.IsMatch(output, @"START_PENDING|STOP_PENDING|CONTINUE_PENDING|PAUSE_PENDING|PAUSED|正在启动|正在停止|已暂停", RegexOptions.IgnoreCase))
+                return ServiceRuntimeState.Transition;
+            return ServiceRuntimeState.Unknown;
         }
 
         private static bool HasEnabledWirelessAdapter()
@@ -448,6 +495,12 @@ namespace WifiHotspot
                 message.IndexOf("group or resource is not in the correct state", StringComparison.OrdinalIgnoreCase) >= 0)
                 AddIssue(diagnosis, "承载网络状态冲突", "Windows 承载网络处于不可启动状态，程序已尝试关闭系统移动热点、完整重置、重启 WLAN 服务并重启无线网卡，但仍失败。",
                     "设置 → 网络和 Internet → 移动热点 → 关闭系统移动热点；退出其他热点/虚拟网卡软件；设备管理器 → 网络适配器 → 右键无线网卡 → 禁用后再启用；仍失败时更新无线网卡驱动，或改用支持 AP 模式的 USB 无线网卡。", "ms-settings:network-mobilehotspot");
+
+            if (message.Contains("WLAN AutoConfig 状态未稳定") ||
+                message.Contains("WLAN AutoConfig 服务未能在") ||
+                message.Contains("重启电脑后重试"))
+                AddIssue(diagnosis, "WLAN AutoConfig 服务重启失败", "服务卡在 STOP_PENDING/STOPPED 过渡状态，继续重置承载网络无效。",
+                    "先重启电脑，再以管理员运行软件；若反复出现，services.msc → WLAN AutoConfig → 启动类型设为自动并检查依赖服务。", "services.msc");
         }
 
         public HotspotStatus GetStatus(out string detail)
@@ -638,13 +691,12 @@ namespace WifiHotspot
         private static bool WaitForWlanService(bool running, int timeoutMs, out string detail)
         {
             string output = string.Empty;
+            ServiceRuntimeState desired = running ? ServiceRuntimeState.Running : ServiceRuntimeState.Stopped;
             int deadline = Environment.TickCount + timeoutMs;
             while (true)
             {
-                var query = RunCommand("sc", "query WlanSvc");
-                output = query.Message;
-                bool isRunning = query.Success && IsWlanServiceRunning(query.Message);
-                if (isRunning == running)
+                ServiceRuntimeState state = GetServiceRuntimeState("WlanSvc", out output);
+                if (state == desired)
                 {
                     detail = running ? "WLAN AutoConfig 正在运行" : "WLAN AutoConfig 已停止";
                     return true;
@@ -658,23 +710,96 @@ namespace WifiHotspot
             }
         }
 
+        private static ServiceRuntimeState WaitForWlanServiceSettled(int timeoutMs, out string detail)
+        {
+            string output = string.Empty;
+            int deadline = Environment.TickCount + timeoutMs;
+            while (true)
+            {
+                ServiceRuntimeState state = GetServiceRuntimeState("WlanSvc", out output);
+                if (state == ServiceRuntimeState.Running || state == ServiceRuntimeState.Stopped)
+                {
+                    detail = state == ServiceRuntimeState.Running ? "WLAN AutoConfig 正在运行" : "WLAN AutoConfig 已停止";
+                    return state;
+                }
+                if (Environment.TickCount - deadline >= 0 || timeoutMs <= 0)
+                {
+                    detail = "WLAN AutoConfig 状态未稳定\n" + output;
+                    return ServiceRuntimeState.Unknown;
+                }
+                Thread.Sleep(300);
+            }
+        }
+
+        private static bool EnsureWlanServiceRunning(out string detail)
+        {
+            var messages = new List<string>();
+            string waitDetail;
+            ServiceRuntimeState state = WaitForWlanServiceSettled(70000, out waitDetail);
+            if (state == ServiceRuntimeState.Running)
+            {
+                detail = waitDetail;
+                return true;
+            }
+            if (state != ServiceRuntimeState.Stopped)
+            {
+                detail = "WLAN AutoConfig 状态未稳定，无法安全启动；请重启电脑后重试。\n" + waitDetail;
+                return false;
+            }
+
+            var start = RunCommand("sc", "start WlanSvc");
+            messages.Add("启动 WLAN AutoConfig: " + start.Message);
+            state = WaitForWlanServiceSettled(20000, out waitDetail);
+            messages.Add(waitDetail);
+            if (state == ServiceRuntimeState.Running)
+            {
+                detail = string.Join("\n", messages.ToArray());
+                return true;
+            }
+
+            detail = "WLAN AutoConfig 服务未能在启动后进入正在运行状态；请重启电脑后重试。\n" + string.Join("\n", messages.ToArray());
+            return false;
+        }
+
         private static bool RestartWlanService(out string detail)
         {
             var messages = new List<string>();
             string waitDetail;
+            ServiceRuntimeState state = WaitForWlanServiceSettled(70000, out waitDetail);
+            if (state == ServiceRuntimeState.Unknown)
+            {
+                detail = "WLAN AutoConfig 状态未稳定，未执行服务重启；请重启电脑后重试。\n" + waitDetail;
+                return false;
+            }
 
-            var stop = RunCommand("sc", "stop WlanSvc");
-            messages.Add("停止 WLAN AutoConfig: " + stop.Message);
-            WaitForWlanService(false, 5000, out waitDetail);
-            messages.Add(waitDetail);
+            if (state == ServiceRuntimeState.Running)
+            {
+                var stop = RunCommand("sc", "stop WlanSvc");
+                messages.Add("停止 WLAN AutoConfig: " + stop.Message);
+                if (!WaitForWlanService(false, 70000, out waitDetail))
+                {
+                    messages.Add(waitDetail);
+                    detail = "WLAN AutoConfig 服务未能在 70 秒内停止，仍处于过渡状态；请重启电脑后重试。\n" + string.Join("\n", messages.ToArray());
+                    return false;
+                }
+                messages.Add(waitDetail);
+            }
+            else
+            {
+                messages.Add("停止 WLAN AutoConfig: 服务已停止");
+            }
 
-            var start = RunCommand("sc", "start WlanSvc");
-            messages.Add("启动 WLAN AutoConfig: " + start.Message);
-            bool running = WaitForWlanService(true, 12000, out waitDetail);
-            messages.Add(waitDetail);
+            string startDetail;
+            if (!EnsureWlanServiceRunning(out startDetail))
+            {
+                messages.Add(startDetail);
+                detail = "WLAN AutoConfig 服务重启失败；请重启电脑后重试。\n" + string.Join("\n", messages.ToArray());
+                return false;
+            }
+            messages.Add(startDetail);
 
             detail = string.Join("\n", messages.ToArray());
-            return running;
+            return true;
         }
 
         private static List<string> GetRecoverableWirelessAdapterNames(IcsManager.NetworkAdapterInfo wirelessAdapter)
@@ -802,6 +927,8 @@ namespace WifiHotspot
             {
                 serviceOk = RestartWlanService(out serviceDetail);
                 messages.Add("WLAN 服务重启: " + serviceDetail);
+                if (!serviceOk)
+                    return new HotspotResult { Success = false, Message = "承载网络恢复失败：WLAN AutoConfig 服务未稳定，继续重置无效；请重启电脑后重试。\n" + string.Join("\n", messages.ToArray()) };
             }
 
             string adapterDetail;
@@ -822,18 +949,9 @@ namespace WifiHotspot
 
         private HotspotResult PrepareHostedNetwork(IcsManager.NetworkAdapterInfo wirelessAdapter = null)
         {
-            var query = RunCommand("sc", "query WlanSvc");
-            if (!query.Success || !IsWlanServiceRunning(query.Message))
-            {
-                var startService = RunCommand("sc", "start WlanSvc");
-                if (!startService.Success &&
-                    !startService.Message.Contains("1056") &&
-                    !startService.Message.Contains("already running") &&
-                    !startService.Message.Contains("已经启动"))
-                {
-                    return new HotspotResult { Success = false, Message = "无法启动 WLAN AutoConfig 服务 (WlanSvc):\n" + startService.Message };
-                }
-            }
+            string serviceDetail;
+            if (!EnsureWlanServiceRunning(out serviceDetail))
+                return new HotspotResult { Success = false, Message = "无法确认 WLAN AutoConfig 服务 (WlanSvc) 已运行。\n" + serviceDetail };
 
             foreach (var nic in NetworkInterface.GetAllNetworkInterfaces())
             {
@@ -987,7 +1105,7 @@ namespace WifiHotspot
                 var deep = DeepResetHostedNetworkState(ssid, password, wirelessAdapter, internetAdapter);
                 recoveryDetail += "\n\n高级恢复:\n" + deep.Message;
                 if (!deep.Success)
-                    return new HotspotResult { Success = false, Message = "承载网络状态冲突，软件已自动重启 WLAN 服务并重启无线网卡，但恢复失败。\n\n" + recoveryDetail + "\n\n原始信息:\n" + startResult.Message };
+                    return new HotspotResult { Success = false, Message = "承载网络状态冲突，软件已自动尝试重置承载网络、重启 WLAN 服务并重启无线网卡，但仍失败。建议先重启电脑后重试；如反复出现，请按诊断窗口路径检查无线网卡驱动/AP 支持。\n\n" + recoveryDetail + "\n\n原始信息:\n" + startResult.Message };
                 startResult = RunCommand("netsh", "wlan start hostednetwork");
             }
 

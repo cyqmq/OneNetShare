@@ -131,6 +131,10 @@ msbuild WifiHotspot.sln /p:Configuration=Release /p:Platform=x86
 - Windows 10 2004+ / Windows 11 的部分无线网卡驱动已移除 Hosted Network 支持
 - 解决方案：更新无线网卡驱动；或使用系统自带的"移动热点"功能；或使用支持 AP 模式的 USB 无线网卡
 
+**Q: 诊断提示 WLAN AutoConfig/WlanSvc 处于过渡状态或重启失败**
+- 服务卡在 `STOP_PENDING`/`STOPPED` 时，继续重置承载网络无效
+- 先重启电脑，再以管理员身份运行；若反复出现，`services.msc` → WLAN AutoConfig → 启动类型设为自动并检查依赖服务
+
 **Q: 热点启动但设备连接后无法上网**
 - 检查"共享网络"下拉框是否选择了正确的、 currently 有网络的网卡
 - ICS 设置可能因系统策略失败，程序会提示手动设置：
